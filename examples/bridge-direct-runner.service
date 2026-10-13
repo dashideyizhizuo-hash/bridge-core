@@ -1,0 +1,38 @@
+[Unit]
+Description=Bridge Direct Exec runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bridge-runner
+Group=bridge-runner
+EnvironmentFile=/etc/bridge/direct-runner.env
+ExecStart=/usr/bin/node /opt/bridge/bin/bridge-runner.mjs direct-loop --host-policy /etc/bridge/host.json
+Restart=on-failure
+RestartSec=5
+# bridge-runner uses 64/65/66 for usage/config/authority hard failures.
+# Transient network/server failures are retried inside direct-loop and do not exit.
+RestartPreventExitStatus=64 65 66
+KillMode=control-group
+TimeoutStopSec=15
+NoNewPrivileges=true
+UMask=0077
+
+# Keep the long-lived runner credential outside ordinary child-process authority
+# as far as the host kernel permits. Ubuntu 24.04/systemd supports these.
+ProtectProc=ptraceable
+ProcSubset=pid
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictSUIDSGID=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+
+# Do not add sudo/Docker/SSH/deployment credentials to this service identity.
+# Add only host-local filesystem permissions intentionally required by Direct Exec.
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "project": {
+    "repository": "example/crypto"
+  },
+  "runners": {
+    "research": {
+      "class": "cql-research"
+    },
+    "sandbox": {
+      "class": "bridge-sandbox"
+    }
+  },
+  "workspaceExec": {
+    "enabled": true,
+    "runner": "sandbox",
+    "maxArgv": 32,
+    "maxSeconds": 900,
+    "stdoutBytes": 524288,
+    "stderrBytes": 262144
+  },
+  "capabilities": {
+    "dataset-status": {
+      "class": "observe",
+      "runner": "research",
+      "command": {
+        "argv": [
+          "uv",
+          "run",
+          "cql",
+          "dataset-status",
+          "--json"
+        ]
+      },
+      "resources": [
+        {
+          "name": "cql-data",
+          "env": "CQL_DATA_DIR"
+        }
+      ],
+      "outputs": {
+        "structuredStdout": "json"
+      },
+      "limits": {
+        "timeoutSeconds": 120,
+        "stdoutBytes": 524288,
+        "stderrBytes": 131072
+      }
+    },
+    "dataset-inspect": {
+      "class": "observe",
+      "runner": "research",
+      "parameters": {
+        "dataset_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._:-]+$"
+        },
+        "sample_levels": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 10
+        }
+      },
+      "command": {
+        "argv": [
+          "uv",
+          "run",
+          "cql",
+          "dataset-inspect",
+          "--dataset-id",
+          "{params.dataset_id}",
+          "--sample-levels",
+          "{params.sample_levels}"
+        ]
+      },
+      "resources": [
+        {
+          "name": "cql-data",
+          "env": "CQL_DATA_DIR"
+        }
+      ],
+      "outputs": {
+        "report": "bridge-output/cloud-report.json",
+        "artifacts": [
+          "bridge-output/**"
+        ]
+      },
+      "limits": {
+        "timeoutSeconds": 1800,
+        "reportBytes": 524288,
+        "artifactBytes": 10485760,
+        "stdoutBytes": 1048576,
+        "stderrBytes": 262144
+      }
+    }
+  }
+}

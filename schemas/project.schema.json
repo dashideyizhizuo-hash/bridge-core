@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/example/bridge/schemas/project.schema.json",
+  "title": "Bridge Project Policy v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["version", "project", "runners", "capabilities"],
+  "properties": {
+    "version": { "const": 1 },
+    "project": {
+      "type": "object",
+      "required": ["repository"],
+      "properties": { "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" } }
+    },
+    "runners": { "type": "object", "minProperties": 1 },
+    "capabilities": { "type": "object" },
+    "workspaceExec": { "type": "object" }
+  }
+}

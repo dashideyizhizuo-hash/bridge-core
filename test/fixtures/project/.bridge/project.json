@@ -1,0 +1,243 @@
+{
+  "version": 1,
+  "project": {
+    "repository": "example/project"
+  },
+  "runners": {
+    "research": {
+      "class": "test-runner"
+    },
+    "sandbox": {
+      "class": "bridge-sandbox"
+    }
+  },
+  "capabilities": {
+    "inspect-data": {
+      "class": "observe",
+      "runner": "research",
+      "parameters": {
+        "dataset_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        }
+      },
+      "command": {
+        "argv": [
+          "node",
+          "scripts/inspect.mjs",
+          "{params.dataset_id}"
+        ]
+      },
+      "resources": [
+        {
+          "name": "test-data",
+          "env": "TEST_DATA_DIR"
+        }
+      ],
+      "outputs": {
+        "report": "bridge-output/report.json",
+        "artifacts": [
+          "bridge-output/**"
+        ]
+      },
+      "limits": {
+        "timeoutSeconds": 10,
+        "stdoutBytes": 4096,
+        "stderrBytes": 4096,
+        "reportBytes": 4096,
+        "artifactBytes": 16384
+      }
+    },
+    "mutate-workspace": {
+      "class": "verify",
+      "runner": "research",
+      "command": {
+        "argv": [
+          "node",
+          "scripts/mutate.mjs"
+        ]
+      },
+      "limits": {
+        "timeoutSeconds": 10,
+        "stdoutBytes": 4096,
+        "stderrBytes": 4096
+      }
+    },
+    "huge-output": {
+      "class": "verify",
+      "runner": "research",
+      "command": {
+        "argv": [
+          "node",
+          "scripts/huge.mjs"
+        ]
+      },
+      "limits": {
+        "timeoutSeconds": 10,
+        "stdoutBytes": 128,
+        "stderrBytes": 128
+      }
+    },
+    "token-check": {
+      "class": "verify",
+      "runner": "research",
+      "command": {
+        "argv": [
+          "node",
+          "scripts/token-check.mjs"
+        ]
+      },
+      "outputs": {
+        "report": "bridge-output/token.json"
+      },
+      "limits": {
+        "timeoutSeconds": 10,
+        "stdoutBytes": 4096,
+        "stderrBytes": 4096,
+        "reportBytes": 4096
+      }
+    },
+    "symlink-output": {
+      "class": "verify",
+      "runner": "research",
+      "command": {
+        "argv": [
+          "node",
+          "scripts/symlink.mjs"
+        ]
+      },
+      "outputs": {
+        "artifacts": [
+          "bridge-output/**"
+        ]
+      },
+      "limits": {
+        "timeoutSeconds": 10,
+        "stdoutBytes": 4096,
+        "stderrBytes": 4096,
+        "artifactBytes": 16384
+      }
+    },
+    "unexpected-output": {
+      "class": "verify",
+      "runner": "research",
+      "command": {
+        "argv": [
+          "node",
+          "scripts/unexpected-output.mjs"
+        ]
+      },
+      "outputs": {
+        "report": "bridge-output/report.json"
+      },
+      "limits": {
+        "timeoutSeconds": 10,
+        "stdoutBytes": 4096,
+        "stderrBytes": 4096,
+        "reportBytes": 4096
+      }
+    },
+    "verify-clean": {
+      "class": "verify",
+      "runner": "research",
+      "command": {
+        "argv": [
+          "node",
+          "-e",
+          "process.exit(0)"
+        ]
+      },
+      "limits": {
+        "timeoutSeconds": 10,
+        "stdoutBytes": 4096,
+        "stderrBytes": 4096
+      }
+    },
+    "path-error": {
+      "class": "verify",
+      "runner": "research",
+      "command": {
+        "argv": [
+          "node",
+          "-e",
+          "process.stderr.write(process.env.TEST_DATA_DIR + '/raw'); process.exit(2)"
+        ]
+      },
+      "resources": [
+        {
+          "name": "test-data",
+          "env": "TEST_DATA_DIR"
+        }
+      ],
+      "limits": {
+        "timeoutSeconds": 10,
+        "stdoutBytes": 4096,
+        "stderrBytes": 4096
+      }
+    },
+    "verify-sandbox": {
+      "class": "verify",
+      "runner": "sandbox",
+      "command": {
+        "argv": [
+          "node",
+          "-e",
+          "const fs=require('fs');const s=fs.readFileSync('scripts/inspect.mjs','utf8');if(!s.includes('String(process.argv[2])'))process.exit(9);"
+        ]
+      },
+      "limits": {
+        "timeoutSeconds": 10,
+        "stdoutBytes": 4096,
+        "stderrBytes": 4096
+      }
+    },
+    "verify-mutate-sandbox": {
+      "class": "verify",
+      "runner": "sandbox",
+      "command": {
+        "argv": [
+          "node",
+          "-e",
+          "const fs=require('fs');fs.appendFileSync('scripts/inspect.mjs','\\n// verifier mutation\\n');"
+        ]
+      },
+      "limits": {
+        "timeoutSeconds": 10,
+        "stdoutBytes": 4096,
+        "stderrBytes": 4096
+      }
+    }
+  },
+  "workspaceExec": {
+    "enabled": true,
+    "runner": "sandbox",
+    "maxArgv": 16,
+    "maxSeconds": 10,
+    "stdoutBytes": 4096,
+    "stderrBytes": 4096,
+    "resources": [
+      {
+        "name": "test-data",
+        "env": "TEST_DATA_DIR"
+      }
+    ]
+  },
+  "editing": {
+    "enabled": true,
+    "runner": "sandbox",
+    "allowedBranches": [
+      "agent/**",
+      "codex/**"
+    ],
+    "allowedPaths": [
+      "scripts/**",
+      "README.md"
+    ],
+    "maxOperations": 8,
+    "maxPatchBytes": 65536,
+    "commitSubjectPattern": "^(feat|fix|test|docs|chore): .+",
+    "publish": true
+  }
+}

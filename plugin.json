@@ -1,0 +1,36 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "runner-bridge",
+  "version": "0.3.1",
+  "description": "Connect user-owned hosts without Cloudflare credentials, run local tools/files directly, and use GitHub only for verified engineering workflows.",
+  "author": {
+    "name": "Bridge contributors"
+  },
+  "keywords": [
+    "self-hosted-runner",
+    "developer-tools",
+    "mcp",
+    "github-actions",
+    "local-data",
+    "agent-execution"
+  ],
+  "extensions": {
+    "com.openai": {
+      "apps": "./.app.json",
+      "interface": {
+        "displayName": "Bridge",
+        "shortDescription": "Connect a host once, then run local tools directly.",
+        "longDescription": "Use Bridge to self-connect a user-owned host without exposing Cloudflare credentials, PATs, SSH keys, or per-project setup. Direct Exec/Assets handle ordinary commands, local/private data and files; the GitHub engineering plane is used only for source mutation, trusted verification and publication.",
+        "developerName": "Bridge contributors",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "brandColor": "#2563EB",
+        "composerIcon": "./assets/icon.svg",
+        "logo": "./assets/logo.svg"
+      }
+    }
+  }
+}

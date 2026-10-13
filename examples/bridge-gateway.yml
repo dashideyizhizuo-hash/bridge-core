@@ -1,0 +1,161 @@
+name: Bridge Gateway
+
+on:
+  workflow_dispatch:
+    inputs:
+      bridge_kind:
+        description: capability, edit, or batch
+        required: true
+        type: string
+      bridge_request_id:
+        description: Immutable Bridge request ID
+        required: true
+        type: string
+      bridge_request_path:
+        description: Request path on the trusted control ref
+        required: true
+        type: string
+      bridge_target_sha:
+        description: Exact target commit SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bridge-${{ inputs.bridge_request_id }}
+  cancel-in-progress: false
+
+jobs:
+  bridge:
+    # Replace labels only with the runner class approved by this repository's host policy.
+    runs-on: [self-hosted, linux, x64, bridge]
+    timeout-minutes: 60
+    steps:
+      - name: Set up Node.js for Bridge runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Validate dispatch envelope
+        shell: bash
+        env:
+          BRIDGE_KIND: ${{ inputs.bridge_kind }}
+          BRIDGE_REQUEST_ID: ${{ inputs.bridge_request_id }}
+          BRIDGE_REQUEST_PATH: ${{ inputs.bridge_request_path }}
+          BRIDGE_TARGET_SHA: ${{ inputs.bridge_target_sha }}
+        run: |
+          node <<'NODE'
+          const { env } = process;
+          if (!['capability','edit','batch'].includes(env.BRIDGE_KIND)) throw new Error('invalid bridge_kind');
+          if (!/^[A-Za-z0-9._-]{8,160}$/.test(env.BRIDGE_REQUEST_ID ?? '')) throw new Error('invalid bridge_request_id');
+          if (!/^[0-9a-f]{40}$/.test(env.BRIDGE_TARGET_SHA ?? '')) throw new Error('invalid bridge_target_sha');
+          const expected = `.bridge/requests/${env.BRIDGE_REQUEST_ID}.json`;
+          if (env.BRIDGE_REQUEST_PATH !== expected) throw new Error('bridge_request_path does not match request ID');
+          NODE
+
+      - name: Checkout trusted control ref
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+          path: control
+
+      - name: Validate trusted control binding
+        id: control
+        shell: bash
+        env:
+          BRIDGE_KIND: ${{ inputs.bridge_kind }}
+          BRIDGE_REQUEST_ID: ${{ inputs.bridge_request_id }}
+          BRIDGE_REQUEST_PATH: ${{ inputs.bridge_request_path }}
+          BRIDGE_TARGET_SHA: ${{ inputs.bridge_target_sha }}
+          BRIDGE_REPOSITORY: ${{ github.repository }}
+          BRIDGE_CONTROL_SHA: ${{ github.sha }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const cp = require('node:child_process');
+          const git = args => cp.execFileSync('git',['-C','control',...args],{encoding:'utf8'}).trim();
+          const head = git(['rev-parse','HEAD']);
+          if (head !== process.env.BRIDGE_CONTROL_SHA) throw new Error('control checkout SHA mismatch');
+          const parent = git(['rev-parse','HEAD^']);
+          const path = process.env.BRIDGE_REQUEST_PATH;
+          const changed = git(['diff','--name-status',`${parent}..${head}`,'--']);
+          if (changed !== `A\t${path}`) throw new Error(`control commit must add only ${path}`);
+          const request = JSON.parse(fs.readFileSync(`control/${path}`,'utf8'));
+          if (request.requestId !== process.env.BRIDGE_REQUEST_ID) throw new Error('request ID mismatch');
+          if (request.repository !== process.env.BRIDGE_REPOSITORY) throw new Error('request repository mismatch');
+          if (request.policy?.sha !== parent) throw new Error('control parent must equal trusted policy SHA');
+          if (request.target?.sha !== process.env.BRIDGE_TARGET_SHA) throw new Error('target SHA mismatch');
+          const kind = request.mode === 'batch' ? 'batch' : (Array.isArray(request.operations) ? 'edit' : 'capability');
+          if (kind !== process.env.BRIDGE_KIND) throw new Error('request kind mismatch');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `policy_sha=${request.policy.sha}\n`);
+          NODE
+
+      - name: Checkout exact target SHA
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.bridge_target_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          path: target
+
+      - name: Fetch exact trusted policy commit
+        shell: bash
+        env:
+          BRIDGE_POLICY_SHA: ${{ steps.control.outputs.policy_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git -C target cat-file -e "${BRIDGE_POLICY_SHA}^{commit}" 2>/dev/null; then
+            exit 0
+          fi
+          header="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          GIT_CONFIG_COUNT=1 \
+          GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $header" \
+            git -C target fetch --no-tags --depth=1 origin "$BRIDGE_POLICY_SHA"
+          git -C target cat-file -e "${BRIDGE_POLICY_SHA}^{commit}"
+
+      - name: Materialize immutable request inside target checkout
+        shell: bash
+        run: |
+          cp "control/${{ inputs.bridge_request_path }}" target/.bridge-gateway-request.json
+          chmod 600 target/.bridge-gateway-request.json
+
+      - name: Execute Bridge capability or batch
+        if: inputs.bridge_kind == 'capability' || inputs.bridge_kind == 'batch'
+        uses: example/bridge@0000000000000000000000000000000000000000
+        with:
+          mode: execute
+          request-path: target/.bridge-gateway-request.json
+          repo-path: target
+          host-policy: /etc/bridge/host.json
+          output-dir: .bridge-result
+
+      - name: Prepare and verify Bridge edit
+        if: inputs.bridge_kind == 'edit'
+        uses: example/bridge@0000000000000000000000000000000000000000
+        with:
+          mode: edit-verify
+          request-path: target/.bridge-gateway-request.json
+          repo-path: target
+          host-policy: /etc/bridge/host.json
+          output-dir: .bridge-result
+
+      - name: Upload bounded Bridge evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bridge-result-${{ github.run_id }}
+          path: |
+            .bridge-result/bridge-result.json
+            .bridge-result/evidence/**
+            .bridge-result/prepare/request.json
+            .bridge-result/prepare/prepare-result.json
+            .bridge-result/prepare/candidate.bundle
+            .bridge-result/verification/verification-result.json
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 14

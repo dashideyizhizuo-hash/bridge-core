@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "host": {
+    "id": "research-01"
+  },
+  "repositories": {
+    "example/crypto": {
+      "runnerClasses": [
+        "cql-research",
+        "bridge-sandbox"
+      ],
+      "resources": {
+        "cql-data": {
+          "root": "/data/cql",
+          "read": [
+            "catalog/**",
+            "raw/**",
+            "results/**"
+          ],
+          "write": [
+            "results/**"
+          ]
+        }
+      },
+      "workspaceExec": {
+        "enabled": true,
+        "runnerClass": "bridge-sandbox",
+        "serviceUser": "bridge-sandbox",
+        "maxArgv": 32,
+        "maxSeconds": 900,
+        "deniedRoots": [
+          "/data/cql"
+        ]
+      }
+    },
+    "example/micro-apps-infra": {
+      "runnerClasses": [
+        "micro-apps-ci"
+      ]
+    }
+  }
+}

@@ -1,0 +1,69 @@
+name: Bridge runner
+description: Execute one policy-bound Bridge capability, edit verification, or verified publication step.
+inputs:
+  mode:
+    description: execute, edit-verify, or publish
+    required: false
+    default: execute
+  request-path:
+    description: Path to immutable Bridge request JSON
+    required: false
+  host-policy:
+    description: Administrator-controlled host policy JSON path
+    required: false
+  repo-path:
+    description: Target repository checkout
+    required: false
+    default: .
+  output-dir:
+    description: Bridge result/evidence directory
+    required: false
+    default: .bridge-result
+  prepare-dir:
+    description: Prepared edit evidence directory for publish mode
+    required: false
+  verification-dir:
+    description: Verified edit evidence directory for publish mode
+    required: false
+runs:
+  using: composite
+  steps:
+    - name: Execute Bridge capability
+      if: inputs.mode == 'execute'
+      shell: bash
+      run: >-
+        node "$GITHUB_ACTION_PATH/bin/bridge-runner.mjs" execute
+        --request "${{ inputs.request-path }}"
+        --repo "${{ inputs.repo-path }}"
+        --host-policy "${{ inputs.host-policy }}"
+        --output-dir "${{ inputs.output-dir }}"
+
+    - name: Prepare Bridge edit
+      if: inputs.mode == 'edit-verify'
+      shell: bash
+      run: >-
+        node "$GITHUB_ACTION_PATH/bin/bridge-runner.mjs" prepare-edit
+        --request "${{ inputs.request-path }}"
+        --repo "${{ inputs.repo-path }}"
+        --host-policy "${{ inputs.host-policy }}"
+        --output-dir "${{ inputs.output-dir }}/prepare"
+
+    - name: Verify Bridge edit
+      if: inputs.mode == 'edit-verify'
+      shell: bash
+      run: >-
+        node "$GITHUB_ACTION_PATH/bin/bridge-runner.mjs" verify-edit
+        --prepare-dir "${{ inputs.output-dir }}/prepare"
+        --repo "${{ inputs.repo-path }}"
+        --host-policy "${{ inputs.host-policy }}"
+        --output-dir "${{ inputs.output-dir }}/verification"
+
+    - name: Publish verified Bridge edit
+      if: inputs.mode == 'publish'
+      shell: bash
+      run: >-
+        node "$GITHUB_ACTION_PATH/bin/bridge-runner.mjs" publish-edit
+        --prepare-dir "${{ inputs.prepare-dir }}"
+        --verification-dir "${{ inputs.verification-dir }}"
+        --repo "${{ inputs.repo-path }}"
+        --output-dir "${{ inputs.output-dir }}"

@@ -1,0 +1,7 @@
+{
+  "name": "bridge",
+  "interface": {
+    "displayName": "Bridge"
+  },
+  "plugins": []
+}

@@ -1,0 +1,117 @@
+name: Bridge Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      bridge_request_id:
+        description: Immutable Bridge request ID
+        required: true
+        type: string
+      bridge_source_run_id:
+        description: Successful Bridge edit workflow run ID
+        required: true
+        type: string
+      bridge_source_artifact:
+        description: Exact source evidence artifact name
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: bridge-publish-${{ inputs.bridge_request_id }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # Publication needs GitHub write authority but no project host resources or target-code execution.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Validate publish envelope
+        shell: bash
+        env:
+          BRIDGE_REQUEST_ID: ${{ inputs.bridge_request_id }}
+          BRIDGE_SOURCE_RUN_ID: ${{ inputs.bridge_source_run_id }}
+          BRIDGE_SOURCE_ARTIFACT: ${{ inputs.bridge_source_artifact }}
+        run: |
+          node <<'NODE'
+          const { env } = process;
+          if (!/^[A-Za-z0-9._-]{8,160}$/.test(env.BRIDGE_REQUEST_ID ?? '')) throw new Error('invalid bridge_request_id');
+          if (!/^[1-9][0-9]*$/.test(env.BRIDGE_SOURCE_RUN_ID ?? '')) throw new Error('invalid bridge_source_run_id');
+          if (env.BRIDGE_SOURCE_ARTIFACT !== `bridge-result-${env.BRIDGE_SOURCE_RUN_ID}`) throw new Error('source artifact name must bind source run ID');
+          NODE
+
+      - name: Download exact verified source evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ inputs.bridge_source_artifact }}
+          path: .bridge-source
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.bridge_source_run_id }}
+
+      - name: Validate verified evidence and expose exact base SHA
+        id: evidence
+        shell: bash
+        env:
+          BRIDGE_REQUEST_ID: ${{ inputs.bridge_request_id }}
+          BRIDGE_REPOSITORY: ${{ github.repository }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const prep = JSON.parse(fs.readFileSync('.bridge-source/prepare/prepare-result.json','utf8'));
+          const verified = JSON.parse(fs.readFileSync('.bridge-source/verification/verification-result.json','utf8'));
+          if (prep.requestId !== process.env.BRIDGE_REQUEST_ID || verified.requestId !== prep.requestId) throw new Error('evidence request binding mismatch');
+          if (prep.repository !== process.env.BRIDGE_REPOSITORY || verified.repository !== prep.repository) throw new Error('evidence repository binding mismatch');
+          if (verified.status !== 'VERIFIED') throw new Error('source edit is not VERIFIED');
+          if (verified.baseSha !== prep.baseSha || verified.policySha !== prep.policySha || verified.candidateSha !== prep.candidateSha) throw new Error('verification identity mismatch');
+          if (!/^[0-9a-f]{40}$/.test(prep.baseSha)) throw new Error('invalid base SHA');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `base_sha=${prep.baseSha}\npolicy_sha=${prep.policySha}\n`);
+          NODE
+
+      - name: Checkout exact verified base without persisted credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ steps.evidence.outputs.base_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          path: target
+
+      - name: Fetch exact trusted policy commit
+        shell: bash
+        env:
+          BRIDGE_POLICY_SHA: ${{ steps.evidence.outputs.policy_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git -C target cat-file -e "${BRIDGE_POLICY_SHA}^{commit}" 2>/dev/null; then
+            exit 0
+          fi
+          header="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          GIT_CONFIG_COUNT=1 \
+          GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $header" \
+            git -C target fetch --no-tags --depth=1 origin "$BRIDGE_POLICY_SHA"
+          git -C target cat-file -e "${BRIDGE_POLICY_SHA}^{commit}"
+
+      - name: Publish verified Bridge candidate
+        uses: example/bridge@0000000000000000000000000000000000000000
+        env:
+          BRIDGE_PUBLISH_TOKEN: ${{ github.token }}
+        with:
+          mode: publish
+          prepare-dir: .bridge-source/prepare
+          verification-dir: .bridge-source/verification
+          repo-path: target
+          output-dir: .bridge-publish-result
+
+      - name: Upload publication receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bridge-publish-${{ github.run_id }}
+          path: .bridge-publish-result/publish-result.json
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 14

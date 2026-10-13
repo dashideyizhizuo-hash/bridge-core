@@ -1,0 +1,42 @@
+{
+  "name": "@runner-bridge/core",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "bridge-chat": "./bin/bridge-chat.mjs",
+    "bridge-runner": "./bin/bridge-runner.mjs",
+    "bridge-mcp-server": "./bin/bridge-mcp-server.mjs",
+    "bridge-remote-service": "./bin/bridge-remote-service.mjs",
+    "bridge-task": "./bin/bridge-task.mjs",
+    "bridge-host": "./bin/bridge-host.mjs"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check": "node bin/check-syntax.mjs",
+    "cloudflare:dev": "wrangler dev",
+    "cloudflare:deploy": "wrangler deploy",
+    "cloudflare:migrate": "wrangler d1 migrations apply DB --remote",
+    "cloudflare:bootstrap": "wrangler deploy && wrangler d1 migrations apply DB --remote",
+    "bridge-task": "node bin/bridge-task.mjs",
+    "bridge-chat": "node bin/bridge-chat.mjs",
+    "plugin:package": "node bin/package-plugin.mjs",
+    "cloudflare:upgrade": "wrangler d1 migrations apply DB --remote && wrangler deploy",
+    "host:package": "node bin/package-host.mjs"
+  },
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "0.10.3",
+    "@modelcontextprotocol/node": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0",
+    "fflate": "0.8.3"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.3.1",
+    "wrangler": "4.149.0",
+    "yaml": "2.9.1"
+  },
+  "license": "Elastic-2.0"
+}
