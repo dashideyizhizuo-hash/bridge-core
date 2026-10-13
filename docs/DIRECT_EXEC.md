@@ -17,6 +17,26 @@ No GitHub repository, `.bridge/project.json`, target workflow, target SHA, or re
 
 GitHub-backed execution remains the engineering plane for source edits, trusted verification, candidate evidence, publication and Durable Task Runtime checkpoints.
 
+## Bounded result waiting
+
+For short interactive commands, call `bridge.run(mode="direct", argv=[...],
+waitSeconds=10)`. A completed Run returns the same bounded evidence as
+`bridge.get_result` in that response. Omit `waitSeconds` or use `0` for the
+original immediate receipt. The optional integer is bounded to 0–10 and applies
+only to Direct Exec; it does not change `timeoutSeconds` or Host execution limits.
+
+Bridge first admits the canonical Run, then polls its principal-scoped state at
+most once per second (up to 11 state reads). This includes Host queue latency;
+an offline/idle Host may not finish in the window. Waiting adds server reads and
+does not promise lower Cloudflare cost. If pending, it returns the same `runId`
+with its latest status (`waitStatus: timed_out`). On read failure or HTTP interruption it preserves the
+receipt (`waitStatus: unavailable` or `interrupted`) without output. Continue
+with `bridge.get_run` / `bridge.get_result`; do not resubmit to obtain output.
+Disconnecting the wait does not cancel the durable Run. Existing authorization,
+revocation, output limits and canonical execution identity remain in force.
+File export metadata can be returned inline; file resource links still require
+an explicit `bridge.get_result` read.
+
 ## Minimal host policy
 
 ```json

@@ -50,6 +50,13 @@ It does not expose physical host paths, credentials or raw privileged command te
 
 ### bridge.run
 
+For short Direct commands, supply `waitSeconds: 10` to receive completed output
+inline. The optional integer is 0–10 (default 0, immediate async). If pending,
+interrupted or unavailable, keep the returned Run ID and query it; never submit
+a second Run just to obtain the result. File resource links still require an
+explicit `bridge.get_result`. See [bounded waiting](DIRECT_EXEC.md#bounded-result-waiting).
+
+
 Canonical execution uses `mode: batch`:
 
 ```text

@@ -2,6 +2,7 @@ import { createMcpHandler, fromJsonSchema, McpServer, ResourceTemplate } from '@
 import { Buffer } from 'node:buffer';
 import { assertBridge, errorEnvelope } from './errors.mjs';
 import { MCP_TOOL_DEFINITIONS } from './mcp-tools.mjs';
+import { directWaitSeconds, waitForDirectResult } from './direct-run-wait.mjs';
 
 const TOOL_METHODS = Object.freeze({
   'bridge.discover': 'discover',
@@ -97,7 +98,7 @@ function failureResult(error) {
   };
 }
 
-async function invoke(gateway, toolName, args) {
+async function invoke(gateway, toolName, args, signal) {
   const method = TOOL_METHODS[toolName];
   assertBridge(typeof method === 'string', 'UNKNOWN_MCP_TOOL', `unknown MCP tool: ${toolName}`);
   assertBridge(
@@ -107,6 +108,12 @@ async function invoke(gateway, toolName, args) {
       ? 'bridge.task_transition requires an active durable task session'
       : `gateway missing method: ${method}`
   );
+  if(toolName==='bridge.run') {
+    const seconds=directWaitSeconds(args);
+    const {waitSeconds,...executionArgs}=args;
+    const receipt=await gateway[method](executionArgs);
+    return seconds===0 ? receipt : waitForDirectResult(gateway,receipt,seconds,{signal});
+  }
   return gateway[method](args);
 }
 
@@ -205,7 +212,7 @@ export function createBridgeMcpHandler({
               }));
             }
             return await successResult(
-              await invoke(activeGateway, definition.name, separated.args),
+              await invoke(activeGateway, definition.name, separated.args,scope?.signal),
               activeGateway,
               definition.name,
               clock
