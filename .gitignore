@@ -3,3 +3,4 @@ node_modules/
 .DS_Store
 .codex-remote-attachments/
 dist/
+.bridge-core-deploy-*.json
