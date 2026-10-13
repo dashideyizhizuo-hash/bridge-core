@@ -25,6 +25,11 @@ waitSeconds=10)`. A completed Run returns the same bounded evidence as
 original immediate receipt. The optional integer is bounded to 0–10 and applies
 only to Direct Exec; it does not change `timeoutSeconds` or Host execution limits.
 
+Clients that cache tool definitions may need to reload or reconnect the MCP
+service to discover the new `waitSeconds` input. An older client can keep using
+the immediate receipt and result queries. Confirm the actual inline result;
+passing a new field through a stale client interface is not proof it was sent.
+
 Bridge first admits the canonical Run, then polls its principal-scoped state at
 most once per second (up to 11 state reads). This includes Host queue latency;
 an offline/idle Host may not finish in the window. Waiting adds server reads and
