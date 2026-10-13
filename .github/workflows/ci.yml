@@ -51,9 +51,6 @@ jobs:
         run: node bin/test-host-package.mjs
       - name: Packaged foreground TLS and native-exec round trip
         run: node bin/test-host-portable-package.mjs
-      - name: Inspect macOS launchd state format
-        if: runner.os == 'macOS' && !cancelled()
-        run: launchctl print-disabled "gui/$(id -u)"
       - name: Real isolated macOS launchd lifecycle
         if: runner.os == 'macOS' && !cancelled()
         run: node bin/test-host-launchd.mjs
