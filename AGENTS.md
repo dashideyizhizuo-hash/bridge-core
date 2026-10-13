@@ -21,7 +21,8 @@ Keep `main` independently deployable as the source-available core, including the
 Host and MCP/Cloudflare service. Commercial billing and payment integrations stay
 private and must not enter core main. Audit private candidates separately. Before
 any public release, read `docs/CORE_DISTRIBUTION.md`: the original private repositories' commercial branches/PR history must not be exposed by changing their visibility.
-Initial release acceptance targets Windows and Linux; macOS is deferred.
+Check platform changes on Windows, Linux, and both macOS architectures in public hosted CI.
+Hosted CI does not establish real desktop login/logout or reboot behavior.
 
 ## Development order
 

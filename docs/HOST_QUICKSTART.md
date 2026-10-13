@@ -13,7 +13,7 @@ Confirm current-user command execution, authorize in the browser, then the CLI p
 | Environment | Default behavior |
 | --- | --- |
 | Native Windows | Task Scheduler, current user's login/interactive session, LUA run level; no password, UAC request or LocalSystem service |
-| macOS (preview; further acceptance deferred) | User LaunchAgent in `~/Library/LaunchAgents`; no system daemon |
+| macOS (preview) | User LaunchAgent in `~/Library/LaunchAgents`; no system daemon |
 | Linux / WSL with an available systemd user manager | Existing systemd USER service adapter |
 | No usable background manager | Clearly reported foreground fallback, not a fake installed/running service |
 
@@ -73,8 +73,7 @@ not a guessed disabled state.
 Windows automatic startup means **after this user signs in**, not before login.
 Linux needs its existing systemd user manager. WSL must already be running; Bridge
 does not start the distribution from Windows boot or enable lingering. Sleeping or
-powered-off computers cannot execute commands. Independent autostart controls are
-not yet supported for macOS; that platform's additional acceptance is deferred.
+powered-off computers cannot execute commands. macOS LaunchAgents also support independent autostart controls in the current user's graphical login session. A machine without that session must use foreground mode.
 
 Upgrade and rollback retain running state and autostart independently. A stopped
 Host stays stopped during upgrade. Historical rollback snapshots created before
@@ -116,7 +115,7 @@ On Windows the immutable runtime defaults to `<config-dir>/runtimes`, and newly 
 
 ## Acceptance scope and remaining checks
 
-Current CI runs the complete Linux repository suite on Node 22/24. Historical Windows/macOS CI is not current-head platform evidence. Native acceptance scripts exercise real ACLs, child processes and cancellation, packed npx foreground execution through an isolated TLS fixture, identity reuse, and user-supervisor lifecycle. `node bin/test-host-maintenance-native.mjs` additionally checks real non-elevated Windows upgrade, failure rollback and uninstall against a unique temporary task, without production credentials. Run it only on native Windows and preserve its cleanup result. The TLS key under `test/fixtures/host-tls` is a PUBLIC test fixture, never a production secret or part of the distributed package.
+Public CI runs the repository suite and package round trips on Windows, Linux, Apple Silicon macOS and Intel macOS with Node 22/24. Its macOS jobs also run an isolated, synthetic launchd heartbeat and independent autostart lifecycle; check the exact commit results, not historical green runs. Native acceptance scripts exercise real ACLs, child processes and cancellation, packed npx foreground execution through an isolated TLS fixture, identity reuse, and user-supervisor lifecycle. `node bin/test-host-maintenance-native.mjs` additionally checks real non-elevated Windows upgrade, failure rollback and uninstall against a unique temporary task, without production credentials. Run it only on native Windows and preserve its cleanup result. The TLS key under `test/fixtures/host-tls` is a PUBLIC test fixture, never a production secret or part of the distributed package.
 
 Mock/provider integration, native CI tasks and test-server round trips do not prove human production consent or reboot behavior. The npm preview is publicly available, but fresh-user browser consent, standard-user desktop visibility and logout/reboot/WSL boot still need their own acceptance evidence. Runtime changes do not silently replace an existing installation.
 
@@ -163,7 +162,7 @@ plus real non-elevated Windows Task Scheduler and existing WSL systemd USER
 acceptance using synthetic daemons. Those checks cover upgrade, failed-start
 recovery, rollback, uninstall and independent autostart/activity preservation,
 including owned-fixture cleanup. Fresh-user consent, real login/logout/reboot and
-WSL boot remain unverified. Further macOS acceptance is deferred. Availability of
+WSL boot remain unverified. Hosted macOS checks do not substitute for those desktop acceptance steps. Availability of
 the published npm preview does not establish those platform results or publication of this source export.
 
 ## 中文快速使用

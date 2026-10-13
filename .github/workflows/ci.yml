@@ -36,7 +36,7 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test "$(node -p 'process.versions.node.split(".")[0]')" = "$EXPECTED_NODE"
-          echo "Candidate: $EXPECTED_SHA; Node: $(node --version); runner: $RUNNER_NAME" >> "$GITHUB_STEP_SUMMARY"
+          echo "Candidate: $EXPECTED_SHA; Node: $(node --version); platform: $(node -p 'process.platform + "/" + process.arch'); runner: $RUNNER_NAME" >> "$GITHUB_STEP_SUMMARY"
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Reject known high-risk dependency advisories
         if: matrix.node == 24
@@ -51,6 +51,9 @@ jobs:
         run: node bin/test-host-package.mjs
       - name: Packaged foreground TLS and native-exec round trip
         run: node bin/test-host-portable-package.mjs
+      - name: Inspect macOS launchd state format
+        if: runner.os == 'macOS' && !cancelled()
+        run: launchctl print-disabled "gui/$(id -u)"
       - name: Real isolated macOS launchd lifecycle
         if: runner.os == 'macOS' && !cancelled()
         run: node bin/test-host-launchd.mjs

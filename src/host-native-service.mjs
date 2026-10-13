@@ -141,9 +141,9 @@ function launchdAutostart(paths,options) {
   assertBridge(match,'HOST_SERVICE_FAILED','Could not read launchd disabled state');
   const entries=new Map();
   for(const line of match[1].split(/\r?\n/).map(value=>value.trim()).filter(Boolean)) {
-    const item=line.match(/^"([^"\r\n]+)"\s*=>\s*(true|false)\s*[,;]?$/);
+    const item=line.match(/^"([^"\r\n]+)"\s*=>\s*(true|false|enabled|disabled)\s*[,;]?$/);
     assertBridge(item&&!entries.has(item[1]),'HOST_SERVICE_FAILED','Unrecognized launchd disabled state');
-    entries.set(item[1],item[2]==='true');
+    entries.set(item[1],item[2]==='true'||item[2]==='disabled');
   }
   // Absent override means enabled for this owned RunAtLoad LaunchAgent.
   return !entries.get(paths.name);

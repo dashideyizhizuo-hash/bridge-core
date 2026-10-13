@@ -10,7 +10,7 @@ async function fixture(t){
  const name='dev.runner-bridge.host.'+'a'.repeat(20),paths={adapter:'launchd',configDir:config,name,domain:'gui/501',receiptPath:join(config,'launchd.json'),unitPath:join(config,'owned.plist')};
  let enabled=true,active=false,loaded=false,budget='normal';const calls=[];
  const exec=(_exe,args)=>{calls.push(args);
- if(args[0]==='print-disabled')return budget==='unavailable'?{status:1,stdout:''}:{status:0,stdout:budget==='malformed'?'unrecognized output':`disabled services = {\n "${name}" => ${enabled?'false':'true'}\n}\n`};
+ if(args[0]==='print-disabled')return budget==='unavailable'?{status:1,stdout:''}:{status:0,stdout:budget==='malformed'?'unrecognized output':`disabled services = {\n "${name}" => ${budget==='words'?(enabled?'enabled':'disabled'):budget==='unknown'?'unknown':enabled?'false':'true'}\n}\n`};
  if(args[0]==='print'&&args[1]===paths.domain)return {status:budget==='no-gui'?1:0,stdout:''};
  if(args[0]==='print')return {status:loaded?0:113,stdout:active?'pid = 12345':''};
  if(args[0]==='disable')enabled=false;if(args[0]==='enable')enabled=true;
@@ -21,7 +21,7 @@ async function fixture(t){
 }
 test('launchd autostart rejects unreadable and malformed enabled state',async t=>{
  const f=await fixture(t);
- for(const state of ['unavailable','malformed','no-gui']){f.set(state);assert.throws(()=>setNativeServiceAutostart(f.paths,false,{exec:f.exec}),e=>e.code==='HOST_SERVICE_UNAVAILABLE'||e.code==='HOST_SERVICE_FAILED');}
+ for(const state of ['unavailable','malformed','no-gui','unknown']){f.set(state);assert.throws(()=>setNativeServiceAutostart(f.paths,false,{exec:f.exec}),e=>e.code==='HOST_SERVICE_UNAVAILABLE'||e.code==='HOST_SERVICE_FAILED');}
  assert.equal(f.calls.filter(a=>['enable','disable'].includes(a[0])).length,0);
 });
 test('launchd enabled and active are independent; toggling never starts or stops',async t=>{
@@ -63,4 +63,13 @@ test('launchd maintenance preserves stopped-but-enabled and running-but-disabled
   await maintainHost(config,'rollback',options);
   state=nativeServiceStatus(paths,options);assert.equal(state.active,initialActive);assert.equal(state.autostartEnabled,!initialActive);
  }
+});
+
+// NIST macOS Security issue 167 records Ventura's literal state tokens.
+// https://github.com/usnistgov/macos_security/issues/167
+test('launchd Ventura enabled/disabled words retain exact inverse-disabled semantics',async t=>{
+ const f=await fixture(t);f.set('words');
+ assert.equal(nativeServiceStatus(f.paths,{exec:f.exec}).autostartEnabled,true);
+ assert.equal(setNativeServiceAutostart(f.paths,false,{exec:f.exec}).autostartEnabled,false);
+ assert.equal(setNativeServiceAutostart(f.paths,true,{exec:f.exec}).autostartEnabled,true);
 });
