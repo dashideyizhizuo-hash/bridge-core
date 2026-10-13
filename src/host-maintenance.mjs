@@ -43,7 +43,7 @@ export async function maintainHost(configDir,operation,{platform=process.platfor
       const runtime=runtimeStatus(configDir);
       if(runtime.localReady || (Number.isSafeInteger(runtime.pid) && processAlive(runtime.pid)))
         assertBridge(current.active && runtime.daemonPath===daemonPath,'HOST_FOREGROUND_CONFLICT','A live runtime is not bound to the active owned registration; stop it before maintenance');
-      assertBridge(platform==='darwin' || typeof current.autostartEnabled==='boolean','HOST_SERVICE_FAILED','Could not read the current autostart setting; registration was not changed');
+      assertBridge(typeof current.autostartEnabled==='boolean','HOST_SERVICE_FAILED','Could not read the current autostart setting; registration was not changed');
       return {schemaVersion:1,platform,configDir,receipt,
         unit:paths.unitPath ? readHostFile(paths.unitPath) : null,active:current.active,
         daemonPath,autostartEnabled:current.autostartEnabled ?? current.active};
@@ -74,7 +74,7 @@ export async function maintainHost(configDir,operation,{platform=process.platfor
     const ready=daemon=>()=>{const state=runtimeStatus(configDir);return {...state,localReady:state.localReady && state.daemonPath===daemon};};
     const restoreAutostart=saved=>{
       if(linux) setHostServiceAutostart(paths,saved.autostartEnabled,options);
-      else if(platform==='win32') setNativeServiceAutostart(paths,saved.autostartEnabled,options);
+      else setNativeServiceAutostart(paths,saved.autostartEnabled,options);
     };
     const restore=async saved=>{
       if(existsSync(paths.receiptPath)) await remove();

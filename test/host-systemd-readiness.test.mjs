@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
+import { rmSync, mkdirSync } from 'node:fs';
+import {makeTestDirectory as mkdtempSync} from './helpers/canonical-temp.mjs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { hostServicePaths, installHostService } from '../src/host-service.mjs';

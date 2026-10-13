@@ -28,9 +28,9 @@ function adapter(configDir,options={}) {
 
 function autostartDetails(adapter,enabled) {
   return {enabled:typeof enabled==='boolean' ? enabled : null,
-    supported:['windows-task','systemd-user'].includes(adapter),
-    scope:adapter==='windows-task' ? 'user-login' : adapter==='systemd-user' ? 'systemd-user-session' : 'unsupported',
-    condition:adapter==='windows-task' ? 'Starts after this user signs in; the computer must be awake.' :
+    supported:['windows-task','systemd-user','launchd'].includes(adapter),
+    scope:['windows-task','launchd'].includes(adapter) ? 'user-login' : adapter==='systemd-user' ? 'systemd-user-session' : 'unsupported',
+    condition:['windows-task','launchd'].includes(adapter) ? 'Starts after this user signs in; the computer must be awake.' :
       adapter==='systemd-user' ? 'Starts with the systemd user manager; WSL must already be running when applicable.' :
         'Independent autostart controls are not supported on this platform.'};
 }
@@ -88,9 +88,9 @@ export function setPersistenceAutostart(configDir,enabled,options={}) {
   assertBridge(typeof enabled==='boolean','HOST_USAGE_INVALID','Autostart must be on or off');
   const user=userInfo();
   assertBridge(user.uid!==0 && user.username!=='root','HOST_ROOT_DENIED','Run Host settings as your ordinary user, not root');
-  assertBridge(['linux','win32'].includes(options.platform ?? process.platform),'HOST_SERVICE_UNSUPPORTED','Autostart controls currently support Windows and Linux only');
+  assertBridge(['linux','win32','darwin'].includes(options.platform ?? process.platform),'HOST_SERVICE_UNSUPPORTED','No supported autostart adapter');
   const impl=adapter(configDir,options);
-  assertBridge(impl && ['windows-task','systemd-user'].includes(impl.id),'HOST_SERVICE_UNSUPPORTED','Autostart controls currently support Windows and Linux only');
+  assertBridge(impl && ['windows-task','systemd-user','launchd'].includes(impl.id),'HOST_SERVICE_UNSUPPORTED','No supported autostart adapter');
   assertBridge(existsSync(configDir),'HOST_SERVICE_UNAVAILABLE','Run setup --background before changing autostart');
   ensureHostDirectory(configDir);
   const lock=resolve(configDir,'.setup-lock');

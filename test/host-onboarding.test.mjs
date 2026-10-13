@@ -1,7 +1,8 @@
 import {ensureHostDirectory,readHostFile} from '../src/host-files.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, statSync, symlinkSync, chmodSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, statSync, symlinkSync, chmodSync, realpathSync } from 'node:fs';
+import {makeTestDirectory as mkdtempSync} from './helpers/canonical-temp.mjs';
 import { tmpdir, userInfo } from 'node:os';
 import { join, dirname } from 'node:path';
 import { createRuntimeReporter } from '../src/host-runtime-status.mjs';
@@ -39,7 +40,7 @@ function fixture(t) {
     return {connected:true,hostId,endpoint};
   };
   const options={endpoint,configDir,login:async()=>{counts.login++;return {endpoint,hostId,pairingToken:pairing};},
-    connect,doctorImpl:()=>({ok:true}),serviceOptions:{env,home:root,exec}};
+    connect,doctorImpl:()=>({ok:true}),serviceOptions:{platform:'linux',env,home:root,exec}};
   return {root,configDir,env,counts,options,exec,failStart:value=>{failStart=value;}};
 }
 test('setup installs privately and reruns without re-pairing or npx cache dependency',{skip:process.platform==='win32'?'POSIX systemd/mode fixture; native Windows is covered separately':false},async t=>{
@@ -113,8 +114,9 @@ test('unsafe paths, file permissions and symlinks are rejected',{skip:process.pl
   await assert.rejects(setupHost(f.options),code('HOST_PATH_DENIED'));
 });
 test('systemd quoting handles spaces, percent and dollar without injecting commands',{skip:process.platform==='win32'?'POSIX systemd/mode fixture; native Windows is covered separately':false},()=>{
-  const unit=hostServiceUnit({daemonPath:'/tmp/my app%p$/daemon.mjs',configDir:'/tmp/my config%h$',
-    nodePath:process.execPath,home:'/tmp/my home$'});
+  const root=realpathSync(tmpdir());
+  const unit=hostServiceUnit({daemonPath:join(root,'my app%p$/daemon.mjs'),configDir:join(root,'my config%h$'),
+    nodePath:process.execPath,home:join(root,'my home$')});
   assert.match(unit,/my app%%p\$\$\/daemon/);assert.match(unit,/my config%%h\$\$/);
   assert.match(unit,/my home\$\/.local\/bin/);assert.doesNotMatch(unit,/my home\$\$\//);
   assert.throws(()=>hostServiceUnit({daemonPath:'/tmp/x\nExecStart=evil',configDir:'/tmp/x'}),code('HOST_PATH_INVALID'));

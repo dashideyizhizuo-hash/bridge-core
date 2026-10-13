@@ -133,6 +133,22 @@ function checkPlist(paths,spec) {
     'HOST_SERVICE_CONFLICT','Existing LaunchAgent does not match its receipt; it was not changed');
 }
 
+function launchdAutostart(paths,options) {
+  assertBridge(launchctl(['print',paths.domain],{...options,discardOutput:true}).status===0,
+    'HOST_SERVICE_UNAVAILABLE','No graphical user launchd session');
+  const result=launchctl(['print-disabled',paths.domain],options);
+  const match=result.status===0 && typeof result.stdout==='string' && result.stdout.match(/^\s*disabled services = \{([\s\S]*)\}\s*$/);
+  assertBridge(match,'HOST_SERVICE_FAILED','Could not read launchd disabled state');
+  const entries=new Map();
+  for(const line of match[1].split(/\r?\n/).map(value=>value.trim()).filter(Boolean)) {
+    const item=line.match(/^"([^"\r\n]+)"\s*=>\s*(true|false|enabled|disabled)\s*[,;]?$/);
+    assertBridge(item&&!entries.has(item[1]),'HOST_SERVICE_FAILED','Unrecognized launchd disabled state');
+    entries.set(item[1],item[2]==='true'||item[2]==='disabled');
+  }
+  // Absent override means enabled for this owned RunAtLoad LaunchAgent.
+  return !entries.get(paths.name);
+}
+
 export function nativeServiceStatus(paths,options={}) {
   const spec=receipt(paths);
   if(paths.adapter==='windows-task') {
@@ -141,7 +157,8 @@ export function nativeServiceStatus(paths,options={}) {
   checkPlist(paths,spec);
   const state=launchctl(['print',paths.domain+'/'+paths.name],options);
   assertBridge(state.status!==0 || spec,'HOST_SERVICE_CONFLICT','An unowned LaunchAgent already uses this name');
-  return {adapter:paths.adapter,name:paths.name,installed:!!spec,active:state.status===0 && /\bpid = \d+/.test(state.stdout),loaded:state.status===0};
+  const autostartEnabled=spec?launchdAutostart(paths,options):false;
+  return {adapter:paths.adapter,name:paths.name,installed:!!spec,active:state.status===0 && /\bpid = \d+/.test(state.stdout),loaded:state.status===0,autostartEnabled};
 }
 
 export function preflightNativeService(paths,options={}) {
@@ -218,9 +235,16 @@ export function removeNativeService(paths,options={}) {
 
 export function setNativeServiceAutostart(paths,enabled,options={}) {
   assertBridge(typeof enabled==='boolean','HOST_USAGE_INVALID','Autostart must be on or off');
-  assertBridge(paths.adapter==='windows-task','HOST_SERVICE_UNSUPPORTED','Autostart controls currently support Windows and Linux only');
+  assertBridge(['windows-task','launchd'].includes(paths.adapter),'HOST_SERVICE_UNSUPPORTED','Unsupported autostart adapter');
   const spec=receipt(paths),state=nativeServiceStatus(paths,options);
   assertBridge(spec && state.installed,'HOST_SERVICE_UNAVAILABLE','Run setup --background before changing autostart');
+  if(paths.adapter==='launchd') {
+    assertBridge(launchctl([enabled?'enable':'disable',paths.domain+'/'+paths.name],options).status===0,
+      'HOST_SERVICE_FAILED','Could not update LaunchAgent autostart');
+    const after=nativeServiceStatus(paths,options);
+    assertBridge(after.autostartEnabled===enabled,'HOST_SERVICE_FAILED','Could not verify LaunchAgent autostart');
+    return after;
+  }
   // TASK_SCRIPT revalidates SID, action, trigger and marker before setting Enabled.
   // It deliberately calls neither Run nor Stop for this operation.
   const result=hostPowerShell(TASK_SCRIPT,{operation:'autostart',name:paths.name,spec,enabled},options);

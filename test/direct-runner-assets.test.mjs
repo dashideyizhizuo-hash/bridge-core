@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import {makeTestDirectory as mkdtempSync} from './helpers/canonical-temp.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { cleanupDirectAssetCache, stageDirectAssets } from '../src/direct-runner-assets.mjs';

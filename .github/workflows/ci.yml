@@ -11,11 +11,15 @@ concurrency:
 jobs:
   test:
     # Public contributions use disposable hosted machines, never the private runner.
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-24.04, windows-2025, macos-15, macos-15-intel]
         node: [22, 24]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -32,7 +36,7 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test "$(node -p 'process.versions.node.split(".")[0]')" = "$EXPECTED_NODE"
-          echo "Candidate: $EXPECTED_SHA; Node: $(node --version); runner: $RUNNER_NAME" >> "$GITHUB_STEP_SUMMARY"
+          echo "Candidate: $EXPECTED_SHA; Node: $(node --version); platform: $(node -p 'process.platform + "/" + process.arch'); runner: $RUNNER_NAME" >> "$GITHUB_STEP_SUMMARY"
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Reject known high-risk dependency advisories
         if: matrix.node == 24
@@ -47,10 +51,14 @@ jobs:
         run: node bin/test-host-package.mjs
       - name: Packaged foreground TLS and native-exec round trip
         run: node bin/test-host-portable-package.mjs
-      # Native persistent user-service lifecycle is an operator-local acceptance step.
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - name: Real isolated macOS launchd lifecycle
+        if: runner.os == 'macOS' && !cancelled()
+        run: node bin/test-host-launchd.mjs
+      # Real desktop login/logout and machine reboot remain separate acceptance.
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: bridge-host-preview-linux-node-${{ matrix.node }}
+          name: bridge-host-preview-${{ matrix.os }}-node-${{ matrix.node }}
           path: dist/host-preview/
           if-no-files-found: error
           retention-days: 14

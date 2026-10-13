@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, realpathSync, rmSync, existsSync, readFileSync, mkdirSync, symlinkSync, statSync } from 'node:fs';
+import { realpathSync, rmSync, existsSync, readFileSync, mkdirSync, symlinkSync, statSync } from 'node:fs';
+import {makeTestDirectory as mkdtempSync} from './helpers/canonical-temp.mjs';
 import { tmpdir, userInfo, homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';

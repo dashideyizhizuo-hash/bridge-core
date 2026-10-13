@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { realpathSync, rmSync } from 'node:fs';
+import {makeTestDirectory as mkdtempSync} from './helpers/canonical-temp.mjs';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { runHost } from '../src/host-runner.mjs';

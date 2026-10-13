@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';
+import { writeFileSync, realpathSync, rmSync } from 'node:fs';
+import {makeTestDirectory as mkdtempSync} from './helpers/canonical-temp.mjs';
 import {tmpdir,userInfo} from 'node:os';
 import {join} from 'node:path';
 import {runDirectRunnerLoop} from '../src/direct-runner-client.mjs';
@@ -9,7 +10,7 @@ const TOKEN='runner_token_abcdefghijklmnopqrstuvwxyz123456';
 const flush=async()=>{for(let i=0;i<15;i++)await new Promise(resolve=>setImmediate(resolve));};
 function fixture(t){
   const root=mkdtempSync(join(tmpdir(),'bridge-polling-'));
-  t.after(()=>{assert.ok(root.startsWith(join(tmpdir(),'bridge-polling-')));rmSync(root,{recursive:true,force:true});});
+  t.after(()=>{assert.ok(root.startsWith(join(realpathSync(tmpdir()),'bridge-polling-')));rmSync(root,{recursive:true,force:true});});
   const hostPolicyPath=join(root,'host.json');
   const policy={version:1,host:{id:'host-polling'},repositories:{},directExec:{enabled:true,
     serviceUser:userInfo().username,root,stateDir:join(root,'state'),maxSeconds:10,stdoutBytes:4096,stderrBytes:4096,resultBytes:4096}};

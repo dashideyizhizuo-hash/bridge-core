@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {makeTestDirectory as mkdtempSync} from './helpers/canonical-temp.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRuntimeReporter, readRuntimeStatus } from '../src/host-runtime-status.mjs';

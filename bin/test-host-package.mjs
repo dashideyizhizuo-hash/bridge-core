@@ -3,7 +3,7 @@
 // production login, host claim, user-service mutation or private-repo access.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 import { HOST_VERSION, HOST_PACKAGE_FILES, HOST_PACKAGE_NAME, HOST_SDK_VERSION } from '../src/host-package-spec.mjs';
 
 const repository=resolve(dirname(fileURLToPath(import.meta.url)),'..');
-const root=mkdtempSync(join(tmpdir(),'bridge-npx-consumer-'));
+const root=realpathSync(mkdtempSync(join(tmpdir(),'bridge-npx-consumer-')));
 const pkg=join(root,'build'),consumer=join(root,'consumer'),installConsumer=join(root,'installed-consumer'),cache=join(root,'npm-cache');
 const home=join(root,'home');
 mkdirSync(consumer);mkdirSync(installConsumer);mkdirSync(home);
