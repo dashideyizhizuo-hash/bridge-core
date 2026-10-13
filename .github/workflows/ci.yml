@@ -51,8 +51,12 @@ jobs:
         run: node bin/test-host-package.mjs
       - name: Packaged foreground TLS and native-exec round trip
         run: node bin/test-host-portable-package.mjs
-      # Native persistent user-service lifecycle is an operator-local acceptance step.
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - name: Real isolated macOS launchd lifecycle
+        if: runner.os == 'macOS' && !cancelled()
+        run: node bin/test-host-launchd.mjs
+      # Real desktop login/logout and machine reboot remain separate acceptance.
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: bridge-host-preview-${{ matrix.os }}-node-${{ matrix.node }}
           path: dist/host-preview/

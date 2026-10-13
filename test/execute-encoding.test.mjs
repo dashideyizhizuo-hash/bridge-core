@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { runBounded } from '../src/execute.mjs';
 import { spawnSync } from 'node:child_process';
 import { isUtf8 } from 'node:buffer';
+import { dirname, join } from 'node:path';
 
 const execute = (source, overrides = {}) => runBounded({
   cwd: process.cwd(), argv: [process.execPath, '-e', source], env: process.env,
@@ -62,15 +63,19 @@ test('output limit does not turn a truncated valid Chinese character into replac
 });
 
 test('real Windows whoami output is explicit about encoding and supports a UTF-8 producer', {skip:process.platform!=='win32'}, async () => {
-  const raw = spawnSync('whoami.exe', ['/user'], {windowsHide:true});
+  const whoami=join(process.env.SystemRoot,'System32','whoami.exe');
+  const cmd=join(process.env.SystemRoot,'System32','cmd.exe');
+  const raw = spawnSync(whoami, ['/user'], {windowsHide:true});
   assert.equal(raw.status, 0);
   const options={cwd:process.cwd(),env:process.env,timeoutSeconds:10,stdoutBytes:65536,stderrBytes:4096};
   if (isUtf8(raw.stdout)) {
-    assert.equal((await runBounded({...options,argv:['whoami.exe','/user']})).stdout, raw.stdout.toString('utf8'));
+    assert.equal((await runBounded({...options,argv:[whoami,'/user']})).stdout, raw.stdout.toString('utf8'));
   } else {
-    await assert.rejects(runBounded({...options,argv:['whoami.exe','/user']}), {code:'OUTPUT_ENCODING_INVALID'});
+    await assert.rejects(runBounded({...options,argv:[whoami,'/user']}), {code:'OUTPUT_ENCODING_INVALID'});
   }
-  const fixed = await runBounded({...options,argv:['cmd.exe','/d','/s','/c','chcp 65001 >nul & whoami /user']});
+  const nativeEnv=Object.fromEntries(Object.entries(process.env).filter(([key])=>key.toLowerCase()!=='path'));
+  nativeEnv.Path=dirname(whoami);
+  const fixed = await runBounded({...options,env:nativeEnv,argv:[cmd,'/d','/s','/c','chcp 65001 >nul & whoami.exe /user']});
   assert.equal(fixed.exitCode, 0);
   assert.ok(fixed.stdout.length > 0);
   assert.ok(!fixed.stdout.includes('\uFFFD'));

@@ -1,7 +1,8 @@
 import {ensureHostDirectory,readHostFile} from '../src/host-files.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, statSync, symlinkSync, chmodSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, statSync, symlinkSync, chmodSync } from 'node:fs';
+import {makeTestDirectory as mkdtempSync} from './helpers/canonical-temp.mjs';
 import { tmpdir, userInfo } from 'node:os';
 import { join, dirname } from 'node:path';
 import { createRuntimeReporter } from '../src/host-runtime-status.mjs';

@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {mkdtempSync,mkdirSync,writeFileSync,rmSync} from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import {makeTestDirectory as mkdtempSync} from './helpers/canonical-temp.mjs';
 import {tmpdir} from 'node:os';
 import {join,resolve,dirname} from 'node:path';
 const script=resolve('bin/check-core-boundary.mjs');
