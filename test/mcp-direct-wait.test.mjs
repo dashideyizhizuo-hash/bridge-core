@@ -30,13 +30,26 @@ test('Direct MCP wait returns completed bounded output after exactly one submiss
   assert.deepEqual(f.calls,{submit:1,state:1,result:1});
   assert.deepEqual(f.inputs,[{mode:'direct',argv:['whoami']}],'wait is not an execution/billing identity parameter');
 });
-test('omitted or zero wait preserves immediate async receipt without polling',async t=>{
+test('omitted Direct wait returns completed output for clients with older tool schemas',async t=>{
   const f=fixture(),client=await clientFor(t,f.gateway);
-  for(const extra of [{},{waitSeconds:0}]) {
-    const response=await client.callTool({name:'bridge.run',arguments:{mode:'direct',argv:['whoami'],...extra}});
-    assert.deepEqual(response.structuredContent,receipt);
+  const response=await client.callTool({name:'bridge.run',arguments:{mode:'direct',argv:['whoami']}});
+  assert.equal(response.isError,undefined);assert.deepEqual(response.structuredContent,result);
+  assert.deepEqual(f.calls,{submit:1,state:1,result:1});
+  assert.deepEqual(f.inputs,[{mode:'direct',argv:['whoami']}]);
+});
+test('explicit zero wait preserves immediate async receipt without polling',async t=>{
+  const f=fixture(),client=await clientFor(t,f.gateway);
+  const response=await client.callTool({name:'bridge.run',arguments:{mode:'direct',argv:['whoami'],waitSeconds:0}});
+  assert.deepEqual(response.structuredContent,receipt);
+  assert.deepEqual(f.calls,{submit:1,state:0,result:0});
+});
+test('non-Direct calls without wait keep their original behavior',async t=>{
+  const f=fixture(),client=await clientFor(t,f.gateway);
+  for(const mode of ['host','connect','asset','capability','edit','batch']) {
+    const response=await client.callTool({name:'bridge.run',arguments:{mode}});
+    assert.equal(response.isError,undefined);assert.deepEqual(response.structuredContent,receipt);
   }
-  assert.deepEqual(f.calls,{submit:2,state:0,result:0});
+  assert.deepEqual(f.calls,{submit:6,state:0,result:0});
 });
 test('wait timeout returns the same running ID; a later result read never submits again',async t=>{
   const f=fixture();f.gateway.getRun=async()=>{f.calls.state++;return {...receipt,status:'RUNNING'};};

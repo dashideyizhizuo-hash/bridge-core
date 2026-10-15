@@ -1,11 +1,12 @@
 import { assertBridge } from './errors.mjs';
 
 export const MAX_DIRECT_WAIT_SECONDS=10;
+const DEFAULT_DIRECT_WAIT_SECONDS=10;
 const TERMINAL=new Set(['SUCCEEDED','FAILED','CANCELED']);
 const POLL_INTERVAL_MS=1000;
 
 export function directWaitSeconds(args) {
-  if(args?.waitSeconds===undefined)return 0;
+  if(args?.waitSeconds===undefined)return args?.mode==='direct' ? DEFAULT_DIRECT_WAIT_SECONDS : 0;
   assertBridge(args.mode==='direct' && Number.isInteger(args.waitSeconds) &&
     args.waitSeconds>=0 && args.waitSeconds<=MAX_DIRECT_WAIT_SECONDS,
     'INVALID_GATEWAY_REQUEST','waitSeconds is supported only for Direct Exec, as an integer from 0 to 10');
