@@ -11,7 +11,7 @@ import { errorEnvelope, BridgeError, assertBridge } from '../src/errors.mjs';
 import { setupHost, hostConfigDir } from '../src/host-onboarding.mjs';
 import { persistenceStatus, stopPersistence, setPersistenceAutostart } from '../src/host-persistence.mjs';
 import { maintainHost } from '../src/host-maintenance.mjs';
-import { HOST_VERSION, DEFAULT_HOST_ENDPOINT } from '../src/host-package-spec.mjs';
+import { HOST_VERSION, HOST_PACKAGE_NAME, DEFAULT_HOST_ENDPOINT } from '../src/host-package-spec.mjs';
 
 const HELP=`Bridge Host ${HOST_VERSION}
 Usage:
@@ -23,7 +23,7 @@ Usage:
   bridge-host upgrade | rollback | uninstall [--yes]
   bridge-host --help | --version
 
-Run with npx @dashideyizhizuo/bridge-host (Node.js 22+ required).
+Run with npx ${HOST_PACKAGE_NAME}@${HOST_VERSION} (Node.js 22+ required).
 Authorize in your browser and pair once. Windows: current-user login task;
 macOS: user LaunchAgent; Linux/WSL: systemd USER service when available.
 Without an available background manager, default setup runs in the foreground.

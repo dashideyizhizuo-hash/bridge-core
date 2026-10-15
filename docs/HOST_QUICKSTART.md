@@ -1,9 +1,12 @@
 # Bridge Host — cross-platform one-command preview
 
-**The operator-scoped npm Host preview is public; this source export has not been remotely released.** The registry commands below install `@dashideyizhizuo/bridge-host@0.4.0-preview.1`. For self-deployment, explicitly select your own endpoint. A package built from this source export is a separate artifact and must not overwrite or republish that registry version. Node.js 22+ and npm remain prerequisites; Bridge does not install Node or require Wrangler or Cloudflare credentials on customer hosts.
+**The current source builds `@dashideyizhizuo/bridge-host@0.4.0-preview.2`, an unpublished candidate containing the newer macOS fixes.** The published npm preview `0.4.0-preview.1` predates those fixes. Build and install the local archive below to use the current source; registry publication remains a separate operator action. For self-deployment, explicitly select your own endpoint. A source-built package is a separate artifact and must not overwrite or republish an existing registry version. Node.js 22+ and npm remain prerequisites; Bridge does not install Node or require Wrangler or Cloudflare credentials on customer hosts.
 
 ```sh
-npx @dashideyizhizuo/bridge-host@0.4.0-preview.1 --endpoint https://YOUR-BRIDGE-HOST/mcp
+npm run host:package
+npm pack ./dist/bridge-host-package --pack-destination ./dist
+npm install --ignore-scripts ./dist/dashideyizhizuo-bridge-host-0.4.0-preview.2.tgz
+npm exec --offline --no -- bridge-host setup --endpoint https://YOUR-BRIDGE-HOST/mcp
 ```
 
 Replace YOUR-BRIDGE-HOST with your real self-hosted HTTPS domain. Source-built packages use a non-live placeholder default; existing Host identities retain their saved endpoint.
@@ -20,7 +23,7 @@ Confirm current-user command execution, authorize in the browser, then the CLI p
 A missing supervisor is no longer an onboarding prerequisite. The foreground mode is deliberately first-class:
 
 ```sh
-npx @dashideyizhizuo/bridge-host@0.4.0-preview.1 --endpoint https://YOUR-BRIDGE-HOST/mcp --foreground
+npm exec --offline --no -- bridge-host --endpoint https://YOUR-BRIDGE-HOST/mcp --foreground
 ```
 
 It pairs on first use, starts the runner in that terminal, and keeps running. Keep the terminal open; Ctrl+C stops execution without deleting the Host ID or local credential. Run the same command to reconnect with the same identity. A closed terminal, logged-out user, stopped WSL distribution, sleeping or powered-off computer cannot execute new commands. Foreground operation is not reboot persistence.
@@ -38,8 +41,8 @@ Defaults: Linux/macOS `~/.config/bridge`; Windows `%LOCALAPPDATA%/bridge`. `XDG_
 Background adapters copy a content-addressed, dependency-free Node runtime outside the npx cache. Deleting the npx cache or checkout does not delete the installed daemon. The user's Node executable must remain installed. Repeated setup reuses the same identity and unchanged registration; it does not automatically upgrade an existing runtime or overwrite a foreign service.
 
 ```sh
-npx @dashideyizhizuo/bridge-host@0.4.0-preview.1 status
-npx @dashideyizhizuo/bridge-host@0.4.0-preview.1 stop
+npm exec --offline --no -- bridge-host status
+npm exec --offline --no -- bridge-host stop
 ```
 
 These commands concern the **managed background registration**, not arbitrary processes. Stop disables/stops it while retaining identity; foreground is stopped with Ctrl+C. launchd/systemd supervise their own user processes. The CLI does not start WSL from Windows boot, enable login lingering, guarantee operation after logout, or alter system power settings. A live Windows launcher may be backing off before a child restart; task-active is not proof of a successful Bridge connection.
@@ -167,7 +170,7 @@ the published npm preview does not establish those platform results or publicati
 
 ## 中文快速使用
 
-运营方的 `@dashideyizhizuo/bridge-host@0.4.0-preview.1` 已公开发布到 npm；这份源码导出候选尚未远程发行。自部署必须指定自己的服务地址。从这份源码自行打包得到的是另一个制品，不得覆盖或重新发布上述 npm 版本。
+当前源码打包为 `@dashideyizhizuo/bridge-host@0.4.0-preview.2` 候选，尚未发布到 npm，已包含较新的 macOS 修复。运营方已发布的旧 `0.4.0-preview.1` 不包含这些修复。按本文开头的命令从源码打包，安装本地 `dashideyizhizuo-bridge-host-0.4.0-preview.2.tgz`，再通过 `npm exec --offline --no -- bridge-host ...` 运行。自部署必须指定自己的服务地址，源码制品不得覆盖或重新发布现有 npm 版本。
 安装前准备 Node.js 22 或更高版本以及 npm。首次运行 `bridge-host --endpoint https://你的实际域名/mcp`，确认允许
 以当前系统用户执行命令，然后在浏览器授权。不要用管理员或 root 身份安装。
 

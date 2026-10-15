@@ -5,6 +5,10 @@ import {makeTestDirectory as mkdtempSync} from './helpers/canonical-temp.mjs';
 import { tmpdir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import childProcess from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { syncBuiltinESMExports } from 'node:module';
+import { performance } from 'node:perf_hooks';
 import { executeRequest } from '../src/runtime.mjs';
 import { BATCH_LIMITS } from '../src/validate.mjs';
 
@@ -117,10 +121,64 @@ test('HEAD drift is stale and does not execute remaining commands', async t => {
 
 test('Run deadline is shared rather than refreshed for each exec step', async t => {
   const s = fixture(t, { project: { workspaceExec: { enabled: true, runner: 'local', maxSeconds: 4 } } });
-  const result = await s.run([exec('one', "setTimeout(()=>process.stdout.write('one'),2400)"), exec('two', "setTimeout(()=>process.stdout.write('two'),2400)", { timeoutSeconds: 3600 }), mark()]);
-  assert.equal(result.error.code, 'EXECUTION_TIMEOUT');
-  assert.deepEqual(states(result), ['SUCCEEDED', 'FAILED', 'SKIPPED']);
-  assert.ok(result.durationMs < 7500, result.durationMs);
+  // Exercise the real batch -> exec -> runBounded deadline propagation without
+  // spending its four-second budget on Git, process startup or CI scheduling.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let now = 0, awaitingChild, cleaning = false;
+  const children = [], pending = [];
+  t.mock.method(performance, 'now', () => now);
+  const spawnMock = t.mock.method(childProcess, 'spawn', (file, args) => {
+    assert.equal(file, process.execPath);
+    assert.equal(args[0], '-e');
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
+    child.closed = false; child.signals = [];
+    child.finish = (output = '', code = 0, signal = null) => {
+      if (child.closed) return;
+      child.closed = true;
+      if (output) child.stdout.emit('data', Buffer.from(output));
+      child.emit('close', code, signal);
+    };
+    child.kill = signal => {
+      if (!child.closed) {
+        child.signals.push(signal);
+        queueMicrotask(() => child.finish('', null, signal));
+      }
+      return true;
+    };
+    children.push(child);
+    if (awaitingChild) { const ready = awaitingChild; awaitingChild = null; ready(child); }
+    else pending.push(child);
+    if (cleaning) setImmediate(() => child.finish());
+    return child;
+  });
+  syncBuiltinESMExports();
+  t.after(() => { spawnMock.mock.restore(); syncBuiltinESMExports(); });
+  const nextChild = () => pending.length ? Promise.resolve(pending.shift()) : new Promise(resolve => { awaitingChild = resolve; });
+  const running = s.run([exec('one', "process.stdout.write('one')"), exec('two', "process.stdout.write('two')", { timeoutSeconds: 3600 }), mark()]);
+  try {
+    const first = await nextChild();
+    now = 2400; t.mock.timers.tick(2400);
+    assert.equal(first.closed, false);
+    first.finish('one');
+    const second = await nextChild();
+    now = 3999; t.mock.timers.tick(1599);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(second.closed, false, 'the second step retains the remaining 1.6 seconds');
+    now = 4000; t.mock.timers.tick(1);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(second.signals, ['SIGTERM'], 'the second step must end at the original Run deadline');
+    const result = await running;
+    assert.equal(result.error.code, 'EXECUTION_TIMEOUT');
+    assert.deepEqual(states(result), ['SUCCEEDED', 'FAILED', 'SKIPPED']);
+    assert.equal(result.steps[0].evidence.stdout, 'one');
+    assert.equal(children.length, 2, 'the suffix must never spawn');
+    assert.equal(result.durationMs, 4000);
+  } finally {
+    cleaning = true;
+    for (const child of children) child.finish();
+    await running;
+  }
 });
 
 test('requested per-step timeout only lowers limits, not the whole Run deadline', async t => {
