@@ -19,16 +19,17 @@ GitHub-backed execution remains the engineering plane for source edits, trusted 
 
 ## Bounded result waiting
 
-For short interactive commands, call `bridge.run(mode="direct", argv=[...],
-waitSeconds=10)`. A completed Run returns the same bounded evidence as
-`bridge.get_result` in that response. Omit `waitSeconds` or use `0` for the
-original immediate receipt. The optional integer is bounded to 0–10 and applies
+Direct commands wait up to 10 seconds by default: call
+`bridge.run(mode="direct", argv=[...])`. A completed Run returns the same bounded
+evidence as `bridge.get_result` in that response. Set `waitSeconds: 0` for an
+immediate async receipt, or an integer from 1–10 for a shorter explicit window.
+The optional integer is bounded to 0–10 and applies
 only to Direct Exec; it does not change `timeoutSeconds` or Host execution limits.
 
-Clients that cache tool definitions may need to reload or reconnect the MCP
-service to discover the new `waitSeconds` input. An older client can keep using
-the immediate receipt and result queries. Confirm the actual inline result;
-passing a new field through a stale client interface is not proof it was sent.
+Clients with cached tool definitions also get the default wait without sending
+a new parameter. Reload or reconnect to discover the `waitSeconds` override,
+including `0` for immediate return. Confirm the actual result; passing a new
+field through a stale client interface is not proof it was sent.
 
 Bridge first admits the canonical Run, then polls its principal-scoped state at
 most once per second (up to 11 state reads). This includes Host queue latency;

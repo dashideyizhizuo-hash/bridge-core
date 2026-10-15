@@ -12,7 +12,7 @@ export const MCP_TOOL_DEFINITIONS = [
   },
   {
     name:'bridge.run',
-    description:'Use mode=direct with argv for ordinary local commands; no repository, SHA, project policy or GitHub workflow is needed. For short interactive commands, set waitSeconds=10 to return completed output in this call, or the same durable runId if still pending. Timeout/disconnection does not cancel execution; query that runId, never resubmit merely to get output. ChatGPT files use mode=asset with the native file parameter and are imported directly into private R2 as temporary transfers (24h by default). Save needed outputs before expiry; reads are retryable and do not delete the file. Direct outputs use bounded exports with exact {export:N} argv placeholders. Set host to a discovered hostId when multiple hosts exist. Windows .cmd scripts and shell built-ins need explicit cmd.exe or PowerShell argv. Connect mode creates a short-lived pairing capability; the user must run the Host client locally to finish pairing. Other modes manage hosts/assets or execute GitHub-backed capability/edit/batch workflows.',
+    description:'Use mode=direct with argv for ordinary local commands; no repository, SHA, project policy or GitHub workflow is needed. Direct commands wait up to 10 seconds by default and return completed output in this call, or the same durable runId if still pending. Set waitSeconds=0 for immediate async return. Timeout/disconnection does not cancel execution; query that runId, never resubmit merely to get output. ChatGPT files use mode=asset with the native file parameter and are imported directly into private R2 as temporary transfers (24h by default). Save needed outputs before expiry; reads are retryable and do not delete the file. Direct outputs use bounded exports with exact {export:N} argv placeholders. Set host to a discovered hostId when multiple hosts exist. Windows .cmd scripts and shell built-ins need explicit cmd.exe or PowerShell argv. Connect mode creates a short-lived pairing capability; the user must run the Host client locally to finish pairing. Other modes manage hosts/assets or execute GitHub-backed capability/edit/batch workflows.',
     inputSchema:{
       type:'object',
       additionalProperties:false,
@@ -66,7 +66,7 @@ export const MCP_TOOL_DEFINITIONS = [
         },
         cwd:{type:'string',minLength:1,maxLength:1024},
         timeoutSeconds:{type:'integer',minimum:1,maximum:3600},
-        waitSeconds:{type:'integer',minimum:0,maximum:10,description:'Direct Exec only: opt-in wait for up to 10 seconds of result polling. Default 0 returns immediately. This does not change the command timeout. Completed output is returned inline; file download links still require get_result. On timeout/interruption/read failure, keep the returned runId and query it instead of submitting again.'},
+        waitSeconds:{type:'integer',minimum:0,maximum:10,description:'Direct Exec only: wait up to 10 seconds by default. Set 0 for immediate async return or 1-10 for an explicit window. This does not change the command timeout. Completed output is returned inline; file download links still require get_result. On timeout/interruption/read failure, keep the returned runId and query it instead of submitting again.'},
         fileName:{type:'string',minLength:1,maxLength:255},
         mimeType:{type:'string',minLength:3,maxLength:192},
         sizeBytes:{type:'integer',minimum:1,maximum:26214400},

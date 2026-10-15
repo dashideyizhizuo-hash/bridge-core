@@ -2,12 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
-import { waitForDirectResult } from '../src/direct-run-wait.mjs';
+import { directWaitSeconds, waitForDirectResult } from '../src/direct-run-wait.mjs';
 import { D1DirectExecStore } from '../src/cloudflare/d1-direct-exec-store.mjs';
 
 const receipt={runId:'dx1:host-a:direct-wait-0001',hostId:'host-a',kind:'direct',transport:'direct',status:'QUEUED'};
 const result={...receipt,status:'SUCCEEDED',evidence:{stdout:'中文\n',stderr:''}};
 function timing() {let now=0;return {clock:()=>now,delay:async ms=>{now+=ms;}};}
+test('only Direct calls default to ten seconds; explicit zero opts out',()=>{
+  assert.equal(directWaitSeconds({mode:'direct'}),10);
+  assert.equal(directWaitSeconds({mode:'direct',waitSeconds:0}),0);
+  assert.equal(directWaitSeconds({mode:'direct',waitSeconds:3}),3);
+  for(const mode of ['host','connect','asset','capability','edit','batch','billing'])
+    assert.equal(directWaitSeconds({mode}),0);
+});
 test('bounded polling returns a late result, including failures and cancellation evidence',async()=>{
   for(const status of ['SUCCEEDED','FAILED','CANCELED']) {
     let reads=0,results=0;
