@@ -30,19 +30,33 @@ test('wait has a fixed read budget even with a stalled clock',async()=>{
   assert.equal(reads,11);
 });
 for(const phase of ['state','result'])for(const abort of [false,true])
-test(`in-flight ${phase} read is bounded by ${abort?'disconnect':'deadline'} with no late output`,async()=>{
-  const cancellation=new AbortController();let rejectRead;
+test(`in-flight ${phase} read is bounded by ${abort?'disconnect':'deadline'} with no late output`,async t=>{
+  // Assert the timer contract, not wall-clock scheduling on a shared CI host.
+  t.mock.timers.enable({apis:['setTimeout']});
+  const cancellation=new AbortController();let rejectRead,entered,now=0,reads=0,settled=false;
+  const inFlight=new Promise(resolve=>{entered=resolve;});
   const pending=new Promise((resolve,reject)=>{rejectRead=reject;});
-  const gateway={getRun:async()=>phase==='state'?pending:{...receipt,status:'SUCCEEDED'},getResult:async()=>pending};
-  const start=performance.now();let abortTimer;
-  if(abort)abortTimer=setTimeout(()=>cancellation.abort(),20);
-  try {
-    const response=await waitForDirectResult(gateway,receipt,1,{signal:cancellation.signal});
-    assert.equal(response.waitStatus,abort?'interrupted':'timed_out');
-    assert.equal(response.runId,receipt.runId);assert.equal(response.evidence,undefined);
-    assert.ok(performance.now()-start<(abort?500:1500));
-    rejectRead(Error('late provider failure'));await new Promise(resolve=>setImmediate(resolve));
-  } finally{clearTimeout(abortTimer);}
+  const blockedRead=()=>{reads++;entered();return pending;};
+  const gateway={getRun:async()=>phase==='state'?blockedRead():{...receipt,status:'SUCCEEDED'},getResult:blockedRead};
+  const waiting=waitForDirectResult(gateway,receipt,1,{signal:cancellation.signal,clock:()=>now})
+    .then(value=>{settled=true;return value;});
+  await inFlight;
+  if(abort) {
+    now=20;cancellation.abort();
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(settled,true,'abort must end an in-flight wait before its deadline');
+  } else {
+    now=999;t.mock.timers.tick(999);
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(settled,false,'the one-second deadline must not fire early');
+    now=1000;t.mock.timers.tick(1);
+  }
+  const response=await waiting;
+  assert.equal(response.waitStatus,abort?'interrupted':'timed_out');
+  assert.equal(response.runId,receipt.runId);assert.equal(response.evidence,undefined);
+  rejectRead(Error('late provider failure'));await new Promise(resolve=>setImmediate(resolve));
+  now=20000;t.mock.timers.tick(20000);
+  assert.equal(reads,1,'a completed wait must not issue another backend read');
 });
 test('disconnect stops waiting without cancelling or changing the durable Run',async()=>{
   const cancellation=new AbortController();let reads=0;
