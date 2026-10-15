@@ -50,6 +50,8 @@ test(`in-flight ${phase} read is bounded by ${abort?'disconnect':'deadline'} wit
     await new Promise(resolve=>setImmediate(resolve));
     assert.equal(settled,false,'the one-second deadline must not fire early');
     now=1000;t.mock.timers.tick(1);
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(settled,true,'the deadline must end an in-flight wait at one second');
   }
   const response=await waiting;
   assert.equal(response.waitStatus,abort?'interrupted':'timed_out');
