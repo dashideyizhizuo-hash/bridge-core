@@ -46,6 +46,9 @@ try {
   const customerPackage=join(installConsumer,'node_modules',HOST_PACKAGE_NAME);
   const manifest=JSON.parse(readFileSync(join(customerPackage,'package.json'),'utf8'));
   assert.equal(manifest.name,HOST_PACKAGE_NAME);
+  assert.equal(manifest.version,HOST_VERSION);
+  assert.equal(manifest.license,'Elastic-2.0');
+  assert.match(readFileSync(join(customerPackage,'LICENSE'),'utf8'),/^Elastic License 2.0/);
   assert.deepEqual(manifest.dependencies,{'@modelcontextprotocol/client':HOST_SDK_VERSION});
   assert.equal(manifest.scripts,undefined,'installation must not run lifecycle scripts');
   assert.deepEqual(manifest.bin,{'bridge-host':'./bin/bridge-host.mjs'});

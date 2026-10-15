@@ -28,9 +28,12 @@ test('public Host package is independently runnable and excludes operator toolin
     for(const args of [['--help'],['--version']]) {
       const result=spawnSync(process.execPath,[join(root,'bin/bridge-host.mjs'),...args],{encoding:'utf8'});
       assert.equal(result.status,0,result.stderr);
-      assert.match(result.stdout,args[0]==='--help' ? /bridge-host/ : /0\.4\.0-preview\.1/);
+      if(args[0]==='--help')assert.ok(result.stdout.includes(`npx ${HOST_PACKAGE_NAME}@${HOST_VERSION}`));
+      else assert.equal(result.stdout.trim(),HOST_VERSION);
     }
     const readme=readFileSync(join(root,'README.md'),'utf8');
     assert.match(readme,/preview/i);assert.match(readme,/Node\.js 22/);
+    assert.ok(readme.includes(`${HOST_PACKAGE_NAME}@${HOST_VERSION}`));
+    assert.ok(readme.includes('dashideyizhizuo-bridge-host-'+HOST_VERSION+'.tgz'));
   } finally {rmSync(root,{recursive:true,force:true});}
 });

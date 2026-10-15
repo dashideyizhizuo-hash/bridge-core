@@ -462,7 +462,7 @@ The repository can build a minimal public customer package:
 npm run host:package
 ```
 
-which produces `@dashideyizhizuo/bridge-host` containing only Direct connect/start/doctor client code and Node built-ins. Publishing the generated package to a public registry is a separate service-release action and requires package-registry publication authority.
+which produces the allowlisted `@dashideyizhizuo/bridge-host` client, including browser pairing, foreground execution, current-user services and local maintenance. The package includes its Host license and one pinned MCP client dependency; the staged background daemon uses Node built-ins. It excludes server configuration, credentials and deployment tooling. See `HOST_QUICKSTART.md` for the candidate version and installation limits. Publishing the generated package to a public registry is a separate service-release action and requires package-registry publication authority.
 
 ### Direct Asset acceptance
 
