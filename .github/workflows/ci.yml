@@ -45,7 +45,15 @@ jobs:
       - name: Keep public core independent of private billing
         if: github.ref == 'refs/heads/main' || github.event.pull_request.base.ref == 'main'
         run: node bin/check-core-boundary.mjs
-      - run: npm test
+      - name: Run the complete suite with bounded Windows process concurrency
+        run: |
+          # Concurrent ACL fixtures each start Windows PowerShell. Bound the
+          # disposable runner load without extending production timeouts.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            node --test --test-concurrency=2 test/*.test.mjs
+          else
+            npm test
+          fi
       - run: node bin/bridge-runner.mjs validate-host-policy --host-policy examples/host.json
       - name: Standalone npm pack / npx / cache-independent daemon
         run: node bin/test-host-package.mjs
