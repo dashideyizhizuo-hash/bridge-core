@@ -1,15 +1,17 @@
-# Bridge Host — cross-platform one-command preview
+# Bridge Host — self-deployment
 
-**The current source builds `@dashideyizhizuo/bridge-host@0.4.0-preview.2`, an unpublished candidate containing the newer macOS fixes.** The published npm preview `0.4.0-preview.1` predates those fixes. Build and install the local archive below to use the current source; registry publication remains a separate operator action. For self-deployment, explicitly select your own endpoint. A source-built package is a separate artifact and must not overwrite or republish an existing registry version. Node.js 22+ and npm remain prerequisites; Bridge does not install Node or require Wrangler or Cloudflare credentials on customer hosts.
+This source builds `@dashideyizhizuo/bridge-host@0.4.0` for your own Bridge deployment. Build the local archive below and explicitly select your self-hosted endpoint. The source-built package has a non-live placeholder default and is a separate artifact from the operated service's npm package; do not overwrite or republish an existing registry version. Node.js 22+ and npm remain prerequisites; Bridge does not install Node or require Wrangler or Cloudflare credentials on customer hosts. Source preparation does not establish registry availability or production acceptance.
 
 ```sh
 npm run host:package
 npm pack ./dist/bridge-host-package --pack-destination ./dist
-npm install --ignore-scripts ./dist/dashideyizhizuo-bridge-host-0.4.0-preview.2.tgz
+npm install --ignore-scripts ./dist/dashideyizhizuo-bridge-host-0.4.0.tgz
 npm exec --offline --no -- bridge-host setup --endpoint https://YOUR-BRIDGE-HOST/mcp
 ```
 
 Replace YOUR-BRIDGE-HOST with your real self-hosted HTTPS domain. Source-built packages use a non-live placeholder default; existing Host identities retain their saved endpoint.
+
+Downloading or installing does not pair an account. Initial setup opens a browser for your own Bridge's sign-in and explicit authorization. Check that principal before allowing. The service assigns a Host ID to that principal; subsequent starts use the private local runner credential. Repeating setup or changing browser accounts does not transfer ownership. The portal/MCP discovers registered logical Hosts rather than scanning the local network. Below, run local `bridge-host` commands through `npm exec --offline --no -- bridge-host ...`; no global installation is assumed.
 
 Confirm current-user command execution, authorize in the browser, then the CLI pairs the computer and selects a supported user-level runtime:
 
@@ -120,7 +122,7 @@ On Windows the immutable runtime defaults to `<config-dir>/runtimes`, and newly 
 
 Public CI runs the repository suite and package round trips on Windows, Linux, Apple Silicon macOS and Intel macOS with Node 22/24. Its macOS jobs also run an isolated, synthetic launchd heartbeat and independent autostart lifecycle; check the exact commit results, not historical green runs. Native acceptance scripts exercise real ACLs, child processes and cancellation, packed npx foreground execution through an isolated TLS fixture, identity reuse, and user-supervisor lifecycle. `node bin/test-host-maintenance-native.mjs` additionally checks real non-elevated Windows upgrade, failure rollback and uninstall against a unique temporary task, without production credentials. Run it only on native Windows and preserve its cleanup result. The TLS key under `test/fixtures/host-tls` is a PUBLIC test fixture, never a production secret or part of the distributed package.
 
-Mock/provider integration, native CI tasks and test-server round trips do not prove human production consent or reboot behavior. The npm preview is publicly available, but fresh-user browser consent, standard-user desktop visibility and logout/reboot/WSL boot still need their own acceptance evidence. Runtime changes do not silently replace an existing installation.
+Mock/provider integration, native CI tasks and test-server round trips do not prove human production consent or reboot behavior. Fresh-user browser consent, standard-user desktop visibility and real logout/reboot still need separate acceptance evidence. Runtime changes do not silently replace an existing installation, and registry availability is separate from a source build.
 
 ### Platform references
 
@@ -161,16 +163,15 @@ supervisor, a still-live recorded daemon PID blocks registration removal; this
 check does not claim that stub tests prove real OS process-tree termination.
 
 These maintenance paths have isolated registration and failure-injection tests,
-plus real non-elevated Windows Task Scheduler and existing WSL systemd USER
+plus real non-elevated Windows Task Scheduler and native Linux systemd USER
 acceptance using synthetic daemons. Those checks cover upgrade, failed-start
 recovery, rollback, uninstall and independent autostart/activity preservation,
 including owned-fixture cleanup. Fresh-user consent, real login/logout/reboot and
-WSL boot remain unverified. Hosted macOS checks do not substitute for those desktop acceptance steps. Availability of
-the published npm preview does not establish those platform results or publication of this source export.
+WSL boot remain unverified. Hosted macOS checks do not substitute for those desktop acceptance steps. Registry availability does not establish those platform results or publication of this source export.
 
 ## 中文快速使用
 
-当前源码打包为 `@dashideyizhizuo/bridge-host@0.4.0-preview.2` 候选，尚未发布到 npm，已包含较新的 macOS 修复。运营方已发布的旧 `0.4.0-preview.1` 不包含这些修复。按本文开头的命令从源码打包，安装本地 `dashideyizhizuo-bridge-host-0.4.0-preview.2.tgz`，再通过 `npm exec --offline --no -- bridge-host ...` 运行。自部署必须指定自己的服务地址，源码制品不得覆盖或重新发布现有 npm 版本。
+当前源码打包版本为 `@dashideyizhizuo/bridge-host@0.4.0`。按本文开头的命令从源码打包，安装本地 `dashideyizhizuo-bridge-host-0.4.0.tgz`，再通过 `npm exec --offline --no -- bridge-host ...` 运行。自部署必须指定自己的服务地址；源码包默认地址是非在线占位符。源码制品与运营方 npm 制品分开，不得覆盖或重新发布现有注册表版本，源码存在也不等于正式包已经发行。
 安装前准备 Node.js 22 或更高版本以及 npm。首次运行 `bridge-host --endpoint https://你的实际域名/mcp`，确认允许
 以当前系统用户执行命令，然后在浏览器授权。不要用管理员或 root 身份安装。
 

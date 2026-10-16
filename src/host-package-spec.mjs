@@ -1,5 +1,5 @@
 // One host package contract shared by packaging and durable service installation.
-export const HOST_VERSION='0.4.0-preview.2';
+export const HOST_VERSION='0.4.0';
 export const HOST_PACKAGE_NAME='@dashideyizhizuo/bridge-host';
 export const HOST_SDK_VERSION='2.3.1';
 export const DEFAULT_HOST_ENDPOINT='https://bridge.example.invalid/mcp';

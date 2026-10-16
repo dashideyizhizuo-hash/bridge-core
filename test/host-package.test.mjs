@@ -32,7 +32,7 @@ test('public Host package is independently runnable and excludes operator toolin
       else assert.equal(result.stdout.trim(),HOST_VERSION);
     }
     const readme=readFileSync(join(root,'README.md'),'utf8');
-    assert.match(readme,/preview/i);assert.match(readme,/Node\.js 22/);
+    assert.match(readme,/self-deployment/i);assert.match(readme,/Node\.js 22/);
     assert.ok(readme.includes(`${HOST_PACKAGE_NAME}@${HOST_VERSION}`));
     assert.ok(readme.includes('dashideyizhizuo-bridge-host-'+HOST_VERSION+'.tgz'));
   } finally {rmSync(root,{recursive:true,force:true});}
