@@ -99,17 +99,17 @@ test('uninstall can remove its exact old virtualized registration while retainin
   assert.equal(existsSync(join(f.config,'maintenance-pending.json')),false);f.retained();
 });
 
-test('background storage rejects a Windows path redirected to a private package view',()=>{
+test('background storage rejects a Windows path redirected to a private package view',t=>{
   assert.equal(typeof hostFiles.assertSharedHostPath,'function');
-  const logical=resolve(tmpdir(),'bridge-shared-path-fixture');
+  const logical=fixture(t).config;
   assert.throws(()=>hostFiles.assertSharedHostPath(logical,{
     platform:'win32',realpath:path=>resolve(path,'package-private-view')
   }),code('HOST_PATH_NOT_SHARED'));
 });
 
-test('shared directory accepts an unchanged physical Windows path',()=>{
+test('shared directory accepts an unchanged physical Windows path',t=>{
   assert.equal(typeof hostFiles.assertSharedHostPath,'function');
-  const logical=resolve(tmpdir(),'bridge-shared-path-fixture');
+  const logical=fixture(t).config;
   assert.doesNotThrow(()=>hostFiles.assertSharedHostPath(logical,{platform:'win32',realpath:path=>path}));
 });
 
