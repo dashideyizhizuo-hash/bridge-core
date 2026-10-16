@@ -69,7 +69,8 @@ if($spec.Count -ne 1){Conflict 'marker'};$spec=$spec[0]
 if($spec.sid -cne $sid -or $spec.name -cne $d.name -or $spec.configDir -cne $d.configDir -or $spec.adapter -cne 'windows-task'){Conflict 'identity'}
 if((AccountSid $def.Principal.UserId) -cne $sid -or $def.Principal.LogonType -ne 3 -or $def.Principal.RunLevel -ne 0 -or $def.Actions.Count -ne 1 -or $def.Triggers.Count -ne 1){Conflict 'principal'}
 $a=$def.Actions.Item(1);$t=$def.Triggers.Item(1)
-if($a.Type -ne 0 -or $a.Path -cne $spec.action.path -or $a.Arguments -cne $spec.action.arguments -or $a.WorkingDirectory -cne $d.configDir -or $t.Type -ne 9 -or (AccountSid $t.UserId) -cne $sid){Conflict 'action'}
+$expectedWorkingDirectory=if($spec.action.PSObject.Properties.Name -ccontains 'workingDirectory'){$spec.action.workingDirectory}else{$spec.configDir}
+if($a.Type -ne 0 -or $a.Path -cne $spec.action.path -or $a.Arguments -cne $spec.action.arguments -or $a.WorkingDirectory -cne $expectedWorkingDirectory -or $t.Type -ne 9 -or (AccountSid $t.UserId) -cne $sid){Conflict 'action'}
 $task.Enabled=$false;$task.Stop(0)
 for($i=0;$i -lt 100 -and $task.GetInstances(0).Count -gt 0;$i++){Start-Sleep -Milliseconds 100}
 if($task.GetInstances(0).Count -gt 0){Conflict 'stillRunning'}
@@ -96,7 +97,8 @@ $svc=New-Object -ComObject 'Schedule.Service';$svc.Connect();$folder=$svc.GetFol
 $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 if($d.spec.sid -cne $sid -or $def.RegistrationInfo.Description -cne $d.spec.marker -or (AccountSid $def.Principal.UserId) -cne $sid -or $def.Principal.LogonType -ne 3 -or $def.Principal.RunLevel -ne 0 -or $def.Triggers.Count -ne 1 -or $def.Actions.Count -ne 1){Conflict 'fixture'}
 $a=$def.Actions.Item(1);$t=$def.Triggers.Item(1)
-if($a.Path -cne $d.spec.action.path -or $a.Arguments -cne $d.spec.action.arguments -or $a.WorkingDirectory -cne $d.spec.configDir -or $t.Type -ne 9 -or (AccountSid $t.UserId) -cne $sid){Conflict 'action'}
+$expectedWorkingDirectory=if($d.spec.action.PSObject.Properties.Name -ccontains 'workingDirectory'){$d.spec.action.workingDirectory}else{$d.spec.configDir}
+if($a.Path -cne $d.spec.action.path -or $a.Arguments -cne $d.spec.action.arguments -or $a.WorkingDirectory -cne $expectedWorkingDirectory -or $t.Type -ne 9 -or (AccountSid $t.UserId) -cne $sid){Conflict 'action'}
 $t.Enabled=[bool]$d.enabled
 [void]$folder.RegisterTaskDefinition($d.spec.name,$def,4,$sid,$null,3,$null)
 @{triggerEnabled=$t.Enabled}|ConvertTo-Json -Compress

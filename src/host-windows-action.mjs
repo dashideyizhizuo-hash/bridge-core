@@ -1,5 +1,10 @@
 import { powershellPath } from './host-platform.mjs';
 import { assertBridge } from './errors.mjs';
+import { win32 } from 'node:path';
+
+export function windowsTaskWorkingDirectory() {
+  return win32.dirname(win32.dirname(win32.dirname(powershellPath())));
+}
 
 export function windowsArgument(value) {
   assertBridge(typeof value==='string' && !/[\x00\r\n]/.test(value),'HOST_SERVICE_INVALID','Invalid Windows argument');
@@ -105,5 +110,8 @@ while($true){
   $backoffMs=[Math]::Min(30000,$backoffMs*2)
 }
 `;
-  return {path:powershellPath(),arguments:'-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand '+Buffer.from(script,'utf16le').toString('base64')};
+  // Task Scheduler may reject a private user directory before launching the
+  // action. Bootstrap in System32; the wrapper still gives Node configDir.
+  return {path:powershellPath(),arguments:'-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand '+Buffer.from(script,'utf16le').toString('base64'),
+    workingDirectory:windowsTaskWorkingDirectory()};
 }
