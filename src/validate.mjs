@@ -272,7 +272,7 @@ export function validateHostPolicy(policy) {
       assertBridge(
         typeof direct.serviceUser === 'string' &&
           direct.serviceUser !== 'root' &&
-          /^[A-Za-z_][A-Za-z0-9._-]{0,63}\$?$/.test(direct.serviceUser),
+          /^[^\p{C}]{1,256}$/u.test(direct.serviceUser),
         'HOST_POLICY_INVALID',
         'directExec.serviceUser invalid'
       );

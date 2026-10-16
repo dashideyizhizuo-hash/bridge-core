@@ -45,12 +45,34 @@ jobs:
       - name: Keep public core independent of private billing
         if: github.ref == 'refs/heads/main' || github.event.pull_request.base.ref == 'main'
         run: node bin/check-core-boundary.mjs
-      - run: npm test
+      - name: Run the complete suite with bounded Windows process concurrency
+        run: |
+          # Concurrent ACL fixtures each start Windows PowerShell. Bound the
+          # disposable runner load without extending production timeouts.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            node --test --test-concurrency=2 test/*.test.mjs
+          else
+            npm test
+          fi
       - run: node bin/bridge-runner.mjs validate-host-policy --host-policy examples/host.json
       - name: Standalone npm pack / npx / cache-independent daemon
         run: node bin/test-host-package.mjs
       - name: Packaged foreground TLS and native-exec round trip
         run: node bin/test-host-portable-package.mjs
+      - name: Real isolated Windows task lifecycle
+        if: runner.os == 'Windows' && !cancelled()
+        run: node bin/test-host-native.mjs
+      - name: Native Linux user-service lifecycle and maintenance
+        if: runner.os == 'Linux' && !cancelled()
+        run: |
+          # Provision only this disposable CI user's manager. The customer
+          # installer never enables lingering or obtains elevated privileges.
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          sudo loginctl enable-linger "$(id -un)"
+          sudo systemctl start "user@$(id -u).service"
+          node bin/test-host-service.mjs
+          node bin/test-host-maintenance-linux.mjs
       - name: Real isolated macOS launchd lifecycle
         if: runner.os == 'macOS' && !cancelled()
         run: node bin/test-host-launchd.mjs

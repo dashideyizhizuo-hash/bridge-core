@@ -53,14 +53,21 @@ export async function loginForHostPairing({endpoint,onAuthorization=()=>{},openB
     });
     await client.connect(transport);
     const reply=await client.callTool({name:'bridge.run',arguments:{mode:'connect'}});
+    if(reply.isError) {
+      const code=reply.structuredContent?.error?.code;
+      throw new BridgeError(typeof code==='string'&&/^[A-Z][A-Z0-9_]{2,63}$/.test(code)?code:'HOST_PAIRING_REJECTED',
+        'Bridge refused Host pairing. Check account access and service availability; no local identity was created.');
+    }
     const receipt=reply.structuredContent;
-    assertBridge(!reply.isError && receipt?.kind==='connect' &&
-      typeof receipt.hostId==='string' && /^host-[A-Za-z0-9-]{8,123}$/.test(receipt.hostId) &&
-      typeof receipt.pairingToken==='string' && /^hp1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(receipt.pairingToken) &&
-      receipt.pairingToken.length<=1024 && receipt.endpoint===bridge.href &&
-      receipt.claimUrl===new URL('/direct/enroll/claim',bridge).href &&
-      Number.isSafeInteger(receipt.expiresAt) && receipt.expiresAt>Date.now(),
-    'HOST_PAIRING_INVALID','Bridge did not return a valid, unexpired host pairing receipt');
+    const fields={kind:receipt?.kind==='connect',
+      hostId:typeof receipt?.hostId==='string' && /^host-[A-Za-z0-9-]{8,123}$/.test(receipt.hostId),
+      pairingToken:typeof receipt?.pairingToken==='string' && /^hp1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(receipt.pairingToken) && receipt.pairingToken.length<=1024,
+      endpoint:receipt?.endpoint===bridge.href,
+      claimUrl:receipt?.claimUrl===new URL('/direct/enroll/claim',bridge).href,
+      expiresAt:Number.isSafeInteger(receipt?.expiresAt) && receipt.expiresAt>Date.now()};
+    const invalidFields=Object.keys(fields).filter(key=>!fields[key]);
+    assertBridge(invalidFields.length===0,'HOST_PAIRING_INVALID',
+      'Bridge did not return a valid, unexpired host pairing receipt',{invalidFields});
     return {hostId:receipt.hostId,pairingToken:receipt.pairingToken,endpoint:receipt.endpoint};
   } catch(error) {
     if(error instanceof BridgeError) throw error;

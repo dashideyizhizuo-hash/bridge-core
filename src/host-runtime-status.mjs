@@ -9,7 +9,7 @@ const statusPath=dir=>resolve(dir,'runtime-status.json');
 const safeCode=value=>/^[A-Z][A-Z0-9_]{2,63}$/.test(value ?? '') ? value : 'HOST_RUNTIME_FAILED';
 
 // Local diagnostics contain no credentials, remote text, command output or argv.
-export function createRuntimeReporter({configDir,daemonPath,clock=()=>Date.now()}={}) {
+export function createRuntimeReporter({configDir,daemonPath,mode,clock=()=>Date.now()}={}) {
   const path=safeHostPath(statusPath(configDir));
   const startedAt=clock();let previous,updatedAt=0,lastContactAt;
   return ({phase,code}={})=>{
@@ -18,6 +18,7 @@ export function createRuntimeReporter({configDir,daemonPath,clock=()=>Date.now()
     if(phase==='connected') lastContactAt=now;
     if(previous===phase && now-updatedAt<30_000) return;
     const record={schemaVersion:1,pid:process.pid,daemonPath:safeHostPath(daemonPath),startedAt,updatedAt:now,phase,
+      ...(mode!==undefined ? {mode} : {}),
       ...(lastContactAt!==undefined ? {lastContactAt} : {}),...(code!==undefined ? {code:safeCode(code)} : {})};
     if(existsSync(path)) readHostFile(path); // refuse a replaced/unsafe destination
     const temporary=resolve(configDir,`.runtime-status-${randomUUID()}.json`);
@@ -37,6 +38,7 @@ export function readRuntimeStatus(configDir,{clock=()=>Date.now(),alive=pid=>{
     Number.isSafeInteger(value.startedAt) && Number.isSafeInteger(value.updatedAt) &&
     value.updatedAt>=value.startedAt && value.updatedAt<=clock()+60_000 && phases.has(value.phase) &&
     typeof value.daemonPath==='string' &&
+    (value.mode===undefined || ['foreground','background'].includes(value.mode)) &&
     (value.lastContactAt===undefined || (Number.isSafeInteger(value.lastContactAt) &&
       value.lastContactAt>=value.startedAt && value.lastContactAt<=value.updatedAt)),
   'HOST_STATUS_INVALID','Local runtime diagnostic is invalid');
@@ -44,6 +46,7 @@ export function readRuntimeStatus(configDir,{clock=()=>Date.now(),alive=pid=>{
   const localReady=running && ['ready','connected','retrying'].includes(value.phase);
   return {localReady,connected:localReady && value.phase==='connected',phase:value.phase,pid:value.pid,
     daemonPath:safeHostPath(value.daemonPath),updatedAt:value.updatedAt,
+    ...(value.mode!==undefined ? {mode:value.mode} : {}),
     ...(value.lastContactAt!==undefined ? {lastContactAt:value.lastContactAt} : {}),
     ...(value.code!==undefined ? {code:safeCode(value.code)} : {})};
 }
