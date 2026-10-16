@@ -5,12 +5,12 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, realpathSync, existsSync, readFileSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir, userInfo } from 'node:os';
-import { dirname, join, resolve, win32 } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { nativeServicePaths, preflightNativeService, nativeServiceStatus, installNativeService, stopNativeService } from '../src/host-native-service.mjs';
 import { ensureHostDirectory, writeHostFile } from '../src/host-files.mjs';
-import { hostPowerShell, powershellPath } from '../src/host-platform.mjs';
+import { hostPowerShell } from '../src/host-platform.mjs';
 import { windowsAction } from '../src/host-windows-action.mjs';
 
 assert.ok(['win32','darwin'].includes(process.platform));
@@ -21,7 +21,7 @@ const marker=join(configDir,'heartbeat.json');
 const paths=nativeServicePaths(configDir);
 const identity='host-native-lifecycle-fixture';
 writeHostFile(join(configDir,'identity.json'),JSON.stringify({hostId:identity}));
-writeHostFile(daemonPath,`import {writeFileSync,renameSync} from 'node:fs';import {join} from 'node:path';import {userInfo} from 'node:os';const config=process.argv[3];const file=join(config,'heartbeat.json');writeFileSync(file+'.tmp',JSON.stringify({pid:process.pid,parent:process.ppid,user:userInfo().username,config,cwd:process.cwd()}),{mode:0o600});renameSync(file+'.tmp',file);setInterval(()=>{},1000);`);
+writeHostFile(daemonPath,`import {writeFileSync,renameSync} from 'node:fs';import {join} from 'node:path';import {userInfo} from 'node:os';const config=process.argv[3];const file=join(config,'heartbeat.json');writeFileSync(file+'.tmp',JSON.stringify({pid:process.pid,parent:process.ppid,user:userInfo().username,config}),{mode:0o600});renameSync(file+'.tmp',file);setInterval(()=>{},1000);`);
 let owned=false,installAttempted=false,originalFailure,phase='preflight';
 const cleanupTaskScript=`
 $s=New-Object -ComObject 'Schedule.Service';$s.Connect();$folder=$s.GetFolder('\\')
@@ -36,9 +36,8 @@ function FixtureIdentity($value){return ($value -ceq $sid -or $value -ceq $curre
 if($def.RegistrationInfo.Description -cne $d.spec.marker -or $def.Principal.LogonType -ne 3 -or $def.Principal.RunLevel -ne 0 -or
    -not (FixtureIdentity $def.Principal.UserId) -or $def.Actions.Count -ne 1 -or $def.Triggers.Count -ne 1){@{failure='HOST_SERVICE_CONFLICT';field='fixtureOwnership'}|ConvertTo-Json -Compress;exit}
 $a=$def.Actions.Item(1);$trigger=$def.Triggers.Item(1)
-$expectedWorkingDirectory=if($d.spec.action.PSObject.Properties.Name -ccontains 'workingDirectory'){$d.spec.action.workingDirectory}else{$d.spec.configDir}
 if($a.Type -ne 0 -or $a.Path -cne $d.spec.action.path -or $a.Arguments -cne $d.spec.action.arguments -or
-   $a.WorkingDirectory -cne $expectedWorkingDirectory -or $trigger.Type -ne 9 -or -not (FixtureIdentity $trigger.UserId)){
+   $a.WorkingDirectory -cne $d.spec.configDir -or $trigger.Type -ne 9 -or -not (FixtureIdentity $trigger.UserId)){
   @{failure='HOST_SERVICE_CONFLICT';field='fixtureAction'}|ConvertTo-Json -Compress;exit
 }
 $task.Enabled=$false;if($task.State -eq 4){$task.Stop(0)}
@@ -57,8 +56,7 @@ async function heartbeat(previousPid,{timeoutMs=15_000}={}) {
     if(existsSync(marker)) {
       const value=JSON.parse(readFileSync(marker,'utf8'));
       if(previousPid===undefined || value.pid!==previousPid) {
-        assert.equal(value.user,userInfo().username);assert.equal(value.config,configDir);
-        assert.equal(value.cwd,configDir,'The Node child must retain its private configuration working directory');return value;
+        assert.equal(value.user,userInfo().username);assert.equal(value.config,configDir);return value;
       }
     }
     await delay(200);
@@ -79,10 +77,6 @@ try {
   installAttempted=true;
   const started=await installNativeService(paths,{daemonPath});owned=true;
   assert.equal(started.active,true);const first=await heartbeat();
-  if(process.platform==='win32') {
-    const directory=hostPowerShell(`$s=New-Object -ComObject 'Schedule.Service';$s.Connect();$t=$s.GetFolder('\\').GetTask($d.name);@{workingDirectory=$t.Definition.Actions.Item(1).WorkingDirectory}|ConvertTo-Json -Compress`,{name:paths.name});
-    assert.equal(directory.workingDirectory,win32.dirname(win32.dirname(win32.dirname(powershellPath()))),'The scheduler launcher must start in trusted System32');
-  }
   await installNativeService(paths,{daemonPath});assert.equal((await heartbeat()).pid,first.pid);
   taskDiagnostics('before-crash',first);
   phase='crash-restart';
@@ -99,7 +93,6 @@ try {
   const evidence={platform:process.platform,node:process.version,adapter:paths.adapter,
     actualNativeTask:true,currentUserIdentity:true,metacharacterAndUnicodePaths:true,
     idempotentStart:true,crashRestart:true,stopTerminatesChild:true,resumeRetainsIdentity:true,
-    privateNodeWorkingDirectory:true,...(process.platform==='win32'?{trustedSchedulerWorkingDirectory:true}:{}),
     productionLogin:false,productionHostModified:false,logoffOrRebootTest:false,
     windowsPrivilegeNote:process.platform==='win32' ? 'Task configured InteractiveToken/LUA, not LocalSystem; hosted CI may itself be administrator' : undefined};
   const repository=resolve(dirname(fileURLToPath(import.meta.url)),'..');

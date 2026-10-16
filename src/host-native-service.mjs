@@ -7,7 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { hostPowerShell, xmlText } from './host-platform.mjs';
 import { ensureHostDirectory, readHostFile, safeHostPath, writeHostFile } from './host-files.mjs';
 import { BridgeError, assertBridge } from './errors.mjs';
-import { windowsAction, windowsTaskWorkingDirectory } from './host-windows-action.mjs';
+import { windowsAction } from './host-windows-action.mjs';
 export { windowsArgument } from './host-windows-action.mjs';
 
 const hash=value=>createHash('sha256').update(value).digest('hex');
@@ -45,7 +45,6 @@ if($d.operation -eq 'inspect'){
   if(-not $d.spec){Conflict}
 }
 if($d.spec -and $d.spec.sid -ne $sid){Conflict}
-$workingDirectory=if($d.spec -and $d.spec.action.PSObject.Properties.Name -ccontains 'workingDirectory'){$d.spec.action.workingDirectory}else{$d.spec.configDir}
 if($task){
   if(-not $d.spec){Conflict}
   $def=$task.Definition
@@ -59,7 +58,7 @@ if($task){
   Match $a.Type 0 'actionType'
   Match $a.Path $d.spec.action.path 'executable'
   Match $a.Arguments $d.spec.action.arguments 'arguments'
-  Match $a.WorkingDirectory $workingDirectory 'workingDirectory'
+  Match $a.WorkingDirectory $d.spec.configDir 'workingDirectory'
   Match $t.Type 9 'triggerType'
   Match $t.Enabled $true 'triggerEnabled'
   Match (AccountSid $t.UserId) $sid 'triggerIdentity'
@@ -72,7 +71,7 @@ if($d.operation -eq 'install'){
     $def.RegistrationInfo.Description=$d.spec.marker
     $def.Principal.UserId=$sid;$def.Principal.LogonType=3;$def.Principal.RunLevel=0
     $trigger=$def.Triggers.Create(9);$trigger.UserId=$sid;$trigger.Enabled=$true
-    $a=$def.Actions.Create(0);$a.Path=$d.spec.action.path;$a.Arguments=$d.spec.action.arguments;$a.WorkingDirectory=$workingDirectory
+    $a=$def.Actions.Create(0);$a.Path=$d.spec.action.path;$a.Arguments=$d.spec.action.arguments;$a.WorkingDirectory=$d.spec.configDir
     $def.Settings.Enabled=$true;$def.Settings.AllowDemandStart=$true;$def.Settings.StartWhenAvailable=$true
     $def.Settings.DisallowStartIfOnBatteries=$false;$def.Settings.StopIfGoingOnBatteries=$false
     $def.Settings.ExecutionTimeLimit='PT0S';$def.Settings.MultipleInstances=2
@@ -105,9 +104,6 @@ function receipt(paths) {
   const spec=JSON.parse(readHostFile(paths.receiptPath));
   assertBridge(spec.schemaVersion===1 && spec.name===paths.name && spec.configDir===paths.configDir && spec.adapter===paths.adapter,
     'HOST_SERVICE_CONFLICT','Native service receipt does not belong to this configuration');
-  if(paths.adapter==='windows-task' && Object.hasOwn(spec.action??{},'workingDirectory'))
-    assertBridge(spec.action.workingDirectory===windowsTaskWorkingDirectory(),'HOST_SERVICE_CONFLICT',
-      'Native service receipt has an unexpected task working directory');
   return spec;
 }
 function saveReceipt(paths,spec) {
@@ -187,20 +183,10 @@ export function preflightNativeService(paths,options={}) {
 export async function installNativeService(paths,{daemonPath,nodePath=process.execPath,startupStatus,start=true,
   startupAttempts=60,startupDelayMs=250,...options}={}) {
   [daemonPath,nodePath].forEach(safeHostPath);
-  let spec={schemaVersion:1,adapter:paths.adapter,name:paths.name,configDir:paths.configDir,nodePath,daemonPath};
+  const spec={schemaVersion:1,adapter:paths.adapter,name:paths.name,configDir:paths.configDir,nodePath,daemonPath};
   if(paths.adapter==='windows-task') {
     spec.sid=hostPowerShell(TASK_SCRIPT,{operation:'probe'},options).sid;
-    const previous=receipt(paths);
-    if(previous){
-      assertBridge(['schemaVersion','adapter','name','configDir','nodePath','daemonPath','sid'].every(key=>previous[key]===spec[key]),
-        'HOST_SERVICE_CONFLICT','Another runtime is installed; automatic replacement is disabled');
-      // Reuse a precisely owned legacy action, including during rollback. Only
-      // explicit upgrade removes the old registration and creates the new one.
-      nativeServiceStatus(paths,options);
-      spec=previous;
-    }else{
-      spec.action=windowsAction(spec);spec.marker='Bridge Host '+hash(JSON.stringify(spec));
-    }
+    spec.action=windowsAction(spec);spec.marker='Bridge Host '+hash(JSON.stringify(spec));
     saveReceipt(paths,spec);
     hostPowerShell(TASK_SCRIPT,{operation:'install',name:paths.name,spec,start},options);
   } else {
