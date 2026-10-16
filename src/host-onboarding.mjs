@@ -9,6 +9,7 @@ import { DEFAULT_HOST_ENDPOINT } from './host-package-spec.mjs';
 import { hostEndpoint } from './host-http.mjs';
 import { ensureHostDirectory, readHostFile, safeHostPath } from './host-files.mjs';
 import { preparePersistence } from './host-persistence.mjs';
+import {readRuntimeStatus} from './host-runtime-status.mjs';
 
 export function hostConfigDir(env=process.env,home=homedir()) {
   return resolve(env.XDG_CONFIG_HOME || (process.platform==='win32' ? env.LOCALAPPDATA || resolve(home,'AppData/Local') : resolve(home,'.config')),'bridge');
@@ -53,6 +54,9 @@ export async function setupHost({endpoint,configDir=hostConfigDir(),service=true
     assertBridge(!existsSync(resolve(dir,'maintenance-pending.json')),'HOST_MAINTENANCE_INCOMPLETE',
       'An interrupted maintenance transaction must be reconciled before setup; retain the snapshot and identity');
     const existing=existingConnection(dir,user);
+    const runtime=readRuntimeStatus(dir);
+    assertBridge(!(runtime.mode==='foreground' && runtime.localReady),'HOST_ALREADY_RUNNING',
+      'A foreground Host is running; stop it before setup or background installation');
     const selected=hostEndpoint(endpoint ?? existing?.endpoint ?? DEFAULT_HOST_ENDPOINT).href;
     assertBridge(!existing || existing.endpoint===selected,'HOST_ENDPOINT_MISMATCH',
       'Existing Host belongs to a different Bridge endpoint; it was not re-paired');

@@ -28,9 +28,9 @@ function defaultStateDir(configDir) {
   return resolve(process.env.XDG_STATE_HOME || (process.platform==='win32' ? process.env.LOCALAPPDATA || resolve(homedir(),'AppData/Local') : resolve(homedir(),'.local','state')),'bridge','direct-exec');
 }
 const atomicSecretWrite=writeHostFile;
-function minimalPolicy(hostId,configDir) {
-  const user=userInfo().username;
-  assertBridge(user!=='root','DIRECT_CONNECT_DENIED','self-service connect must not run as root');
+function minimalPolicy(hostId,configDir,owner) {
+  const user=owner.username;
+  assertBridge(owner.uid!==0 && user!=='root','DIRECT_CONNECT_DENIED','self-service connect must not run as root');
   const stateDir=defaultStateDir(configDir);
   return {version:1,host:{id:hostId},repositories:{},directExec:{
     enabled:true,serviceUser:user,root:homedir(),stateDir,assetDir:resolve(stateDir,'assets'),
@@ -45,13 +45,15 @@ function assertAbsent(path) {
 
 export async function connectDirectHost({endpoint:valueEndpoint,pairingToken:valuePairingToken,
   expectedHostId,configDir=defaultConfigDir(),fetchImpl=globalThis.fetch,
-  randomToken=()=>randomBytes(32).toString('base64url')
+  randomToken=()=>randomBytes(32).toString('base64url'),user=userInfo()
 }={}) {
   assertBridge(typeof fetchImpl==='function' && typeof randomToken==='function',
     'DIRECT_CONNECT_INVALID','fetch implementation and random token generator are required');
   const bridge=endpoint(valueEndpoint);
   const pair=pairingToken(valuePairingToken);
-  const policy=minimalPolicy('pending',configDir); // Reject root before consuming a one-use capability.
+  const policy=minimalPolicy('pending',configDir,user);
+  // Validate all local settings before consuming the one-use remote claim.
+  validateHostPolicy(policy);
   if(expectedHostId!==undefined) assertBridge(typeof expectedHostId==='string' && /^[A-Za-z0-9_.-]{1,128}$/.test(expectedHostId),
     'DIRECT_CONNECT_INVALID','expected host identity is invalid');
   const dir=resolve(configDir);

@@ -51,6 +51,20 @@ jobs:
         run: node bin/test-host-package.mjs
       - name: Packaged foreground TLS and native-exec round trip
         run: node bin/test-host-portable-package.mjs
+      - name: Real isolated Windows task lifecycle
+        if: runner.os == 'Windows' && !cancelled()
+        run: node bin/test-host-native.mjs
+      - name: Native Linux user-service lifecycle and maintenance
+        if: runner.os == 'Linux' && !cancelled()
+        run: |
+          # Provision only this disposable CI user's manager. The customer
+          # installer never enables lingering or obtains elevated privileges.
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          sudo loginctl enable-linger "$(id -un)"
+          sudo systemctl start "user@$(id -u).service"
+          node bin/test-host-service.mjs
+          node bin/test-host-maintenance-linux.mjs
       - name: Real isolated macOS launchd lifecycle
         if: runner.os == 'macOS' && !cancelled()
         run: node bin/test-host-launchd.mjs
