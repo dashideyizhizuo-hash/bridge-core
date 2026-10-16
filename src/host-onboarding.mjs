@@ -7,12 +7,12 @@ import { doctor } from './doctor.mjs';
 import { assertBridge, BridgeError } from './errors.mjs';
 import { DEFAULT_HOST_ENDPOINT } from './host-package-spec.mjs';
 import { hostEndpoint } from './host-http.mjs';
-import { ensureHostDirectory, readHostFile, safeHostPath } from './host-files.mjs';
+import { ensureHostDirectory, readHostFile, safeHostPath, defaultHostConfigDirectory, assertSharedHostPath } from './host-files.mjs';
 import { preparePersistence } from './host-persistence.mjs';
 import {readRuntimeStatus} from './host-runtime-status.mjs';
 
 export function hostConfigDir(env=process.env,home=homedir()) {
-  return resolve(env.XDG_CONFIG_HOME || (process.platform==='win32' ? env.LOCALAPPDATA || resolve(home,'AppData/Local') : resolve(home,'.config')),'bridge');
+  return defaultHostConfigDirectory(env,home);
 }
 
 function existingConnection(dir,user) {
@@ -72,11 +72,17 @@ export async function setupHost({endpoint,configDir=hostConfigDir(),service=true
       });
       assertBridge(receipt.endpoint===selected,'HOST_ENDPOINT_MISMATCH','Pairing receipt endpoint does not match');
       connection=await connect({endpoint:selected,pairingToken:receipt.pairingToken,
-        expectedHostId:receipt.hostId,configDir:dir,fetchImpl});
+        expectedHostId:receipt.hostId,configDir:dir,fetchImpl,sharedStorage:persistence.mode==='background',
+        platform:serviceOptions.platform,realpath:serviceOptions.realpath});
     }
     const checked=doctorImpl({hostPolicyPath:resolve(dir,'host.json')});
     assertBridge(checked.ok,'HOST_DOCTOR_FAILED',
       'Host is paired but local validation failed; repair the local configuration instead of re-pairing');
+    if(persistence.mode==='background') {
+      const policy=JSON.parse(readHostFile(resolve(dir,'host.json')));
+      for(const path of [policy.directExec?.root,policy.directExec?.stateDir,policy.directExec?.assetDir,policy.directExec?.exportDir].filter(Boolean))
+        assertSharedHostPath(path,{platform:serviceOptions.platform,realpath:serviceOptions.realpath});
+    }
     const background=await persistence.install({hostId:connection.hostId});
     return {connected:true,hostId:connection.hostId,endpoint:connection.endpoint,configDir:dir,
       reused:existing!==null,mode:persistence.mode,service:background,remoteExecutionVerified:false};

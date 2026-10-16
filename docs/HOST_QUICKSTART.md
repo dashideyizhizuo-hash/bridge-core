@@ -38,7 +38,7 @@ The current OS user's permissions are the execution boundary; this is not an OS 
 
 Windows Host state requires a normal local filesystem path (not a UNC share, device path or alternate stream). The CLI creates and verifies a current-user + SYSTEM ACL **before** writing credentials; chmod 0600 is not treated as Windows security. A new empty file receives its explicit owner/DACL before secret bytes are written; existing files are validated, not silently repaired or widened. POSIX configuration is private current-user-owned storage; symlinks/junctions and unsafe file permissions fail closed.
 
-Defaults: Linux/macOS `~/.config/bridge`; Windows `%LOCALAPPDATA%/bridge`. `XDG_CONFIG_HOME` overrides are honored. The persistent identity is `host.json` + `direct-runner.env`. Account OAuth access tokens, PKCE verifiers and short pairing tokens are not saved as daemon credentials. Runner journals/assets use a private state directory.
+New installations default to `~/.config/bridge` on Windows, Linux and macOS. On Windows, an existing `%LOCALAPPDATA%/bridge` directory is selected instead so an older installation keeps its identity; it is not silently moved or paired again. `XDG_CONFIG_HOME` takes precedence over both defaults. The persistent identity is `host.json` + `direct-runner.env`. Account OAuth access tokens, PKCE verifiers and short pairing tokens are not saved as daemon credentials. Runner journals/assets use a private state directory.
 
 Background adapters copy a content-addressed, dependency-free Node runtime outside the npx cache. Deleting the npx cache or checkout does not delete the installed daemon. The user's Node executable must remain installed. Repeated setup reuses the same identity and unchanged registration; it does not automatically upgrade an existing runtime or overwrite a foreign service.
 
@@ -116,7 +116,11 @@ A failed service start preserves the paired identity. Retry the same setup after
 
 A registered Host, running local process, available network, and successful remote command are different states. Setup reports `remoteExecutionVerified: false`. Only a real connector command proves the production round trip; an active OS task does not. Native setup waits for private daemon readiness in addition to supervisor activity. `status` reports `runtime.localReady`, `runtime.connected`, and a bounded retry code. A successful queue poll confirms contact, not command execution. Dead processes, stale status and startup/import failures do not count as ready. Diagnostics contain no runner secret, argv/output or remote response text.
 
-On Windows the immutable runtime defaults to `<config-dir>/runtimes`, and newly paired identities keep replay journals/assets under `<config-dir>/direct-exec`. Selecting a visible local configuration therefore selects its runtime and replay state together. Explicit `XDG_DATA_HOME` / `XDG_STATE_HOME` overrides remain supported. Some packaged environments expose profile files to their own children but not Task Scheduler. If the daemon cannot load there, choose a normal local directory with `--config-dir`; do not weaken ACLs or use an elevated service. Existing identities, journal roots and immutable registrations are not automatically moved or replaced. Successful lease heartbeats keep status current during long-running commands.
+On Windows the immutable runtime defaults to `<config-dir>/runtimes`, and newly paired identities keep replay journals/assets under `<config-dir>/direct-exec`. Explicit `XDG_DATA_HOME` / `XDG_STATE_HOME` overrides remain supported. Existing identities, journal roots and immutable registrations are not automatically moved or replaced. Successful lease heartbeats keep status current during long-running commands.
+
+Some packaged Windows terminals give their child processes a private, redirected view of AppData. A path can appear to exist there while Task Scheduler cannot see it. Background setup checks for this before browser authorization; a new background claim also checks configuration and replay-state storage before sending the claim. `HOST_PATH_NOT_SHARED` means the selected path is not shared with the background process. Foreground and manual operation do not require this background-only check.
+
+For a new installation, run from a normal Windows terminal and use the default home configuration, or explicitly select a shared local directory with `--config-dir`. If an identity already exists in a redirected directory, keep its configuration, credential and journals. Do not delete those files or select an empty directory to repeat pairing; stop the old runtime and reconcile the existing installation before an explicit move. Do not weaken ACLs or switch to an elevated service to make a private package directory visible.
 
 ## Acceptance scope and remaining checks
 
@@ -183,6 +187,10 @@ WSL boot remain unverified. Hosted macOS checks do not substitute for those desk
 - `bridge-host stop`：立即停止后台运行并关闭自动启动，保留身份；`setup --background` 重新开启并启动。
 - 显式升级、回退、卸载使用上面的维护命令；卸载不删除身份、凭据或执行记录。
 - 电脑休眠、关机、退出当前用户或停止 WSL 后，不保证能执行远程命令。
+
+新安装默认保存在 `~/.config/bridge`（Windows 对应当前用户目录下的 `.config\bridge`）。Windows 若已有旧的 `%LOCALAPPDATA%\bridge`，仍选用旧目录以保留原配对；`XDG_CONFIG_HOME` 的优先级不变。不会自动移动旧文件或创建第二台 Host。
+
+后台安装遇到 `HOST_PATH_NOT_SHARED`，表示所选路径无法确认为共享的后台路径；打包应用的 AppData 重定向会导致终端和后台任务看到不同目录。新安装可从普通 Windows 终端使用默认目录，或用 `--config-dir` 选择可共享的本地目录。已有配对时保留原配置、凭据和执行记录，先停止旧运行实例并处理原安装；不要删除凭据、换空目录重新授权，也不要放宽权限或改用管理员服务。前台及手动运行不受这个后台共享目录检查限制。
 
 CLI 当前仍使用英文提示和固定错误代码；文件名及命令内容的中文传输与界面
 翻译是两个不同问题。遇到错误请保留错误代码，不要分享任何令牌或私钥。

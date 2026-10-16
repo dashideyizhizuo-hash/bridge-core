@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { BridgeError, assertBridge } from './errors.mjs';
 import { validateHostPolicy } from './validate.mjs';
 import { hostEndpoint, boundedHostFetch } from './host-http.mjs';
-import { ensureHostDirectory, writeHostFile } from './host-files.mjs';
+import { ensureHostDirectory, writeHostFile, defaultHostConfigDirectory, assertSharedHostPath } from './host-files.mjs';
 
 function endpoint(value) {
   try { return hostEndpoint(value); }
@@ -21,7 +21,7 @@ function pairingToken(value) {
   return value;
 }
 function defaultConfigDir() {
-  return resolve(process.env.XDG_CONFIG_HOME || (process.platform==='win32' ? process.env.LOCALAPPDATA || resolve(homedir(),'AppData/Local') : resolve(homedir(),'.config')),'bridge');
+  return defaultHostConfigDirectory();
 }
 function defaultStateDir(configDir) {
   if(process.platform==='win32' && !process.env.XDG_STATE_HOME) return resolve(configDir,'direct-exec');
@@ -45,7 +45,8 @@ function assertAbsent(path) {
 
 export async function connectDirectHost({endpoint:valueEndpoint,pairingToken:valuePairingToken,
   expectedHostId,configDir=defaultConfigDir(),fetchImpl=globalThis.fetch,
-  randomToken=()=>randomBytes(32).toString('base64url'),user=userInfo()
+  randomToken=()=>randomBytes(32).toString('base64url'),user=userInfo(),
+  sharedStorage=false,platform=process.platform,realpath
 }={}) {
   assertBridge(typeof fetchImpl==='function' && typeof randomToken==='function',
     'DIRECT_CONNECT_INVALID','fetch implementation and random token generator are required');
@@ -70,6 +71,10 @@ export async function connectDirectHost({endpoint:valueEndpoint,pairingToken:val
   // Initialize the configuration ACL before nested state creates its parent.
   // Protect execution journals/assets before consuming pairing or writing secrets.
   ensureHostDirectory(policy.directExec.stateDir);
+  if(sharedStorage) {
+    for(const path of [dir,policy.directExec.root,policy.directExec.stateDir,policy.directExec.assetDir,policy.directExec.exportDir].filter(Boolean))
+      assertSharedHostPath(path,{platform,realpath});
+  }
   const runnerToken=randomToken();
   assertBridge(typeof runnerToken==='string' && /^[A-Za-z0-9_-]{40,128}$/.test(runnerToken),
     'DIRECT_CONNECT_INVALID','local runner token generator returned invalid material');

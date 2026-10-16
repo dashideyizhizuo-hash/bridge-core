@@ -3,7 +3,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { userInfo } from 'node:os';
 import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { ensureHostDirectory, readHostFile, writeHostFile } from './host-files.mjs';
+import { ensureHostDirectory, readHostFile, writeHostFile, assertSharedHostPath } from './host-files.mjs';
 import { hostServicePaths, hostServiceStatus, setHostServiceAutostart, hostServiceIdentity, stopHostService, stageHostRuntime, installHostService, removeHostService, resumeHostService } from './host-service.mjs';
 import { nativeServicePaths, nativeServiceStatus, setNativeServiceAutostart, stopNativeService, installNativeService, removeNativeService } from './host-native-service.mjs';
 import { readRuntimeStatus } from './host-runtime-status.mjs';
@@ -18,6 +18,13 @@ export async function maintainHost(configDir,operation,{platform=process.platfor
   const linux=platform==='linux';
   assertBridge(linux || ['win32','darwin'].includes(platform),'HOST_SERVICE_UNSUPPORTED','No maintenance adapter');
   const paths=linux ? hostServicePaths(configDir,{...options,platform}) : nativeServicePaths(configDir,{...options,platform});
+  const sharedOptions={platform,realpath:options.realpath};
+  // Uninstall remains available to stop an owned, unreachable installation.
+  // Replacement must not tear down the old task before validating visibility.
+  if(operation!=='uninstall') {
+    assertSharedHostPath(configDir,sharedOptions);
+    if(operation==='upgrade')assertSharedHostPath(process.execPath,sharedOptions);
+  }
   const status=()=>linux ? hostServiceStatus(paths,options) : nativeServiceStatus(paths,options);
   const remove=async()=>{
     const runtime=runtimeStatus(configDir);
@@ -70,7 +77,19 @@ export async function maintainHost(configDir,operation,{platform=process.platfor
         'HOST_FOREGROUND_CONFLICT','A runtime is still running without an owned registration; stop it before rollback');
     }
     const target=operation==='rollback' ? validate(JSON.parse(readHostFile(previous))) : null;
-    const daemonPath=operation==='upgrade' ? stageHostRuntime(hostServicePaths(configDir,{...options,platform}),options) : null;
+    const runtimePaths=operation==='upgrade' ? hostServicePaths(configDir,{...options,platform}) : null;
+    const daemonPath=runtimePaths ? stageHostRuntime(runtimePaths,options) : null;
+    if(operation!=='uninstall') {
+      const targetSpec=target ? JSON.parse(target.receipt) : null;
+      for(const path of (runtimePaths ? [runtimePaths.runtimeRoot,daemonPath] : [targetSpec.nodePath,targetSpec.daemonPath]))
+        assertSharedHostPath(path,sharedOptions);
+      const policyPath=resolve(configDir,'host.json');
+      if(existsSync(policyPath)) {
+        const policy=JSON.parse(readHostFile(policyPath));
+        for(const path of [policy.directExec?.root,policy.directExec?.stateDir,policy.directExec?.assetDir,policy.directExec?.exportDir].filter(Boolean))
+          assertSharedHostPath(path,sharedOptions);
+      }
+    }
     const ready=daemon=>()=>{const state=runtimeStatus(configDir);return {...state,localReady:state.localReady && state.daemonPath===daemon};};
     const restoreAutostart=saved=>{
       if(linux) setHostServiceAutostart(paths,saved.autostartEnabled,options);
