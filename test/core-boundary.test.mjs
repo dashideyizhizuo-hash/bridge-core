@@ -30,6 +30,18 @@ test('public core gate accepts deployable core and rejects private payment artif
   add('src/core.mjs',"export {login} from './commercial/auth.mjs';");
   assert.equal(check().status,1);
   add('src/core.mjs','export const core=true;');
+  for(const field of ['dependencies','devDependencies','optionalDependencies']) {
+    add('package.json',JSON.stringify({[field]:{'@waffo/pancake-ts':'0.26.0'}}));
+    const result=check();assert.equal(result.status,1);assert.match(result.stdout,/payment SDK dependency/);
+  }
+  add('package.json','{"private":true}');
+  for(const variable of ['WAFFO_PRIVATE_KEY','WAFFO_MERCHANT_ID','WAFFO_STORE_ID']) {
+    add('src/core.mjs','export const credential=env.'+variable+';');assert.equal(check().status,1);
+  }
+  add('src/core.mjs','export const core=true;');
+  add('migrations/0030_waffo_payments.sql','CREATE TABLE private_payment(id TEXT);');
+  assert.equal(check().status,1);git('rm','-f','migrations/0030_waffo_payments.sql');
+  assert.equal(check().status,0);
   // A maintained authentication library is not inherently commercial code.
   add('package.json','{"dependencies":{"better-auth":"1.7.7"}}');
   assert.equal(check().status,0);
