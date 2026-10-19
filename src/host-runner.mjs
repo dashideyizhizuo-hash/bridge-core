@@ -9,7 +9,7 @@ import { runDirectRunnerLoop } from './direct-runner-client.mjs';
 import { hostEndpoint } from './host-http.mjs';
 import { validateHostPolicy } from './validate.mjs';
 
-export async function runHost({configDir,once=false,pollMs=5000,signal,fetchImpl=globalThis.fetch,onError=()=>{},onState=()=>{}}={}) {
+export async function runHost({configDir,once=false,pollMs=15000,signal,fetchImpl=globalThis.fetch,onError=()=>{},onState=()=>{}}={}) {
   // Verify local credential and policy ownership on every launch, not only setup.
   validateHostPolicy(JSON.parse(readHostFile(resolve(configDir,'host.json'))));
   readHostFile(resolve(configDir,'direct-runner.env'));

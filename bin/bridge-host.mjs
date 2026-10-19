@@ -71,7 +71,7 @@ try {
     assertBridge([values.foreground,values.background,values['no-service']].filter(Boolean).length<=1,
       'HOST_USAGE_INVALID','Choose only one of --foreground, --background and --no-service');
     const configDir=values['config-dir'] ? resolve(values['config-dir']) : hostConfigDir();
-    const pollMs=values['poll-ms']===undefined ? 5000 : Number(values['poll-ms']);
+    const pollMs=values['poll-ms']===undefined ? 15000 : Number(values['poll-ms']);
     assertBridge(Number.isSafeInteger(pollMs) && pollMs>=1000 && pollMs<=60_000,'HOST_USAGE_INVALID','Poll interval must be 1000-60000 milliseconds');
     let result,foreground=false;
     if(command==='setup' || command==='connect') {

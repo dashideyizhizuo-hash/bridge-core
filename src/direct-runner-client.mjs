@@ -219,6 +219,10 @@ function authFatal(error) {
   return error?.status===401 || error?.status===403;
 }
 
+function ownerPaused(error) {
+  return [403,409,423].includes(error?.status) && error?.code==='DIRECT_HOST_PAUSED';
+}
+
 function startHeartbeat({
   endpoint,hostId,token,leaseOwner,runId,leaseMs,heartbeatMs,
   controller,fetchImpl,onContact,claimStartedAt
@@ -248,7 +252,7 @@ function startHeartbeat({
       await heartbeatDirectRun({endpoint,hostId,token,leaseOwner,runId,leaseMs,fetchImpl,signal});
       if(!stopped && !controller.signal.aborted) {arm(sentAt);onContact();}
     } catch(error) {
-      if(!stopped && !controller.signal.aborted && (authFatal(error) || error?.status===409)) {
+      if(!stopped && !controller.signal.aborted && (authFatal(error) || ownerPaused(error) || error?.status===409)) {
         fatalError=error;controller.abort(error);
       }
       // Independent deadline still fires while a fetch is pending or busy.
@@ -343,6 +347,7 @@ export async function runDirectRunnerOnce({
         }
       } catch(error) {
         assetFailure=preparingAssets;
+        if(ownerPaused(error))controller.abort(error);
         result=failedResult(request,error,heartbeat.fatalError() ?? error);
         exportItems=[];
       }
@@ -384,7 +389,7 @@ export async function runDirectRunnerLoop({
   endpoint,
   token,
   hostPolicyPath,
-  pollMs=5_000,
+  pollMs=15_000,
   leaseMs=90_000,
   heartbeatMs=20_000,
   maintenanceIntervalMs=60*60*1000,
@@ -430,8 +435,13 @@ export async function runDirectRunnerLoop({
       const timer=setTimeout(done,ms);signal.addEventListener('abort',done,{once:true});
     });
   };
-  let backoffMs=1_000,idlePollMs=pollMs;
-  const maxIdlePollMs=Math.max(pollMs,15_000);
+  let backoffMs=1_000,lastActivityAt=clock();
+  const idleDelay=()=>{
+    // Completed work, not successful empty claims or network retries, renews
+    // the hot window. Cap the exponent before multiplying configurable input.
+    const window=Math.min(6,Math.max(0,Math.floor((clock()-lastActivityAt)/300_000)));
+    return Math.min(60_000,pollMs*(2**window));
+  };
   while(!signal?.aborted) {
     try {
       if(clock()>=nextMaintenanceAt) {
@@ -444,12 +454,18 @@ export async function runDirectRunnerLoop({
       backoffMs=1_000;
       if(once) return result;
       if(result.status==='IDLE') {
-        await pause(idlePollMs);
-        idlePollMs=Math.min(maxIdlePollMs,idlePollMs+pollMs);
-      } else idlePollMs=pollMs; // Completed work immediately claims again.
+        await pause(idleDelay());
+      } else lastActivityAt=clock(); // Completed work immediately claims again.
     } catch(error) {
       if(signal?.aborted) break;
-      idlePollMs=pollMs;
+      if(ownerPaused(error)) {
+        // Only the authenticated, explicit owner-pause response is recoverable
+        // without process restart. Bad/rotated credentials still fail closed.
+        onContact();backoffMs=1_000;
+        if(once)return {status:'PAUSED',hostId:hostPolicy.host.id};
+        await pause(Math.max(pollMs,60_000));
+        continue;
+      }
       onError(error);
       if(once || authFatal(error)) throw error;
       await pause(backoffMs);

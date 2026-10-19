@@ -113,7 +113,19 @@ export async function stageDirectAssets({
     }
 
     const response=await boundedOriginFetch(endpointOrigin(endpoint),{
-      fetchImpl,signal,timeoutMs:60_000,maxBytes:Math.max(asset.sizeBytes,4096)
+      // Asset replies can be 25 MiB, but a 403 is a tiny control message. Use
+      // the existing transport reader to cancel over-limit errors before the
+      // outer asset-sized reader buffers them; retain only the fixed code.
+      fetchImpl:async(input,init)=>{
+        const reply=await fetchImpl(input,init);if(reply.status!==403)return reply;
+        let code='DIRECT_ASSET_DENIED';
+        try{
+          const small=await boundedOriginFetch(endpointOrigin(endpoint),{fetchImpl:async()=>reply,signal:init.signal,timeoutMs:60_000,maxBytes:8192})(input,init);
+          let value;try{value=await small.json();}catch{}
+          if(value?.error?.code==='DIRECT_HOST_PAUSED')code='DIRECT_HOST_PAUSED';
+        }catch(error){if(error?.code!=='HOST_RESPONSE_TOO_LARGE')throw error;}
+        return Response.json({error:{code}},{status:403});
+      },signal,timeoutMs:60_000,maxBytes:Math.max(asset.sizeBytes,4096)
     })(
       `${endpointOrigin(endpoint)}/direct/runner/assets/${encodeURIComponent(asset.assetId)}`,
       {
@@ -128,9 +140,12 @@ export async function stageDirectAssets({
       }
     );
     if(!response.ok) {
-      await response.body?.cancel();
+      // Read only the bounded control error; no provider text is reflected.
+      let paused=false;
+      if(response.status===403){try{paused=(await response.json())?.error?.code==='DIRECT_HOST_PAUSED';}catch{}}
+      else await response.body?.cancel();
       const error=new BridgeError(
-        response.status===401 || response.status===403 ? 'DIRECT_ASSET_DENIED' : 'DIRECT_ASSET_DOWNLOAD_FAILED',
+        paused?'DIRECT_HOST_PAUSED':response.status===401 || response.status===403 ? 'DIRECT_ASSET_DENIED' : 'DIRECT_ASSET_DOWNLOAD_FAILED',
         `Direct Asset download failed with HTTP ${response.status}`
       );
       error.status=response.status;

@@ -129,6 +129,16 @@ test('runner refuses unauthorized asset download',async()=>{
   } finally { f.cleanup(); }
 });
 
+for(const declared of [false,true])test('oversized '+(declared?'declared':'streamed')+' 403 control reply is canceled and cannot become owner pause',async()=>{
+  const f=fixture();let canceled=false,pulls=0;
+  try{
+    const body=new ReadableStream({pull(controller){pulls++;controller.enqueue(new Uint8Array(8193));},cancel(){canceled=true;}},{highWaterMark:0});
+    await assert.rejects(stageDirectAssets({endpoint:'https://bridge.example',token:TOKEN,hostId:'host-main',runId:RUN_ID,leaseOwner:LEASE_OWNER,hostPolicy:f.hostPolicy,
+      assets:[{...asset(),sizeBytes:20000}],fetchImpl:async()=>new Response(body,{status:403,headers:declared?{'content-length':'8193'}:{}})}),e=>e.code==='DIRECT_ASSET_DENIED'&&e.status===403);
+    assert.equal(canceled,true);assert.equal(pulls,declared?0:1);
+  }finally{f.cleanup();}
+});
+
 
 test('host asset cache removes stale transport files but keeps recent files',()=>{
   const f=fixture();
