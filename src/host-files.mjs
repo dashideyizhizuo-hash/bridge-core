@@ -1,7 +1,32 @@
-import { lstatSync, mkdirSync, readFileSync, writeFileSync, openSync, closeSync } from 'node:fs';
+import { lstatSync, mkdirSync, readFileSync, writeFileSync, openSync, closeSync, existsSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { hostPowerShell } from './host-platform.mjs';
 import { assertBridge } from './errors.mjs';
+
+export function defaultHostConfigDirectory(env=process.env,home=homedir(),platform=process.platform) {
+  if(env.XDG_CONFIG_HOME)return resolve(env.XDG_CONFIG_HOME,'bridge');
+  if(platform==='win32') {
+    const legacy=resolve(env.LOCALAPPDATA || resolve(home,'AppData/Local'),'bridge');
+    // Preserve paired, partial and busy legacy installations. Packaged apps
+    // can virtualize newly created AppData directories, hiding them from tasks.
+    if(existsSync(legacy))return legacy;
+  }
+  return resolve(home,'.config','bridge');
+}
+
+export function assertSharedHostPath(value,{platform=process.platform,realpath=realpathSync.native}={}) {
+  if(platform!=='win32')return;
+  let path=safeHostPath(value);
+  while(!existsSync(path) && path!==dirname(path))path=dirname(path);
+  let physical=realpath(path);
+  // Normalize only a local Win32 drive prefix. Shares, device paths and
+  // junctions retain the existing rejection.
+  if(typeof physical==='string' && /^\\\\\?\\[A-Za-z]:\\/.test(physical))physical=physical.slice(4);
+  assertBridge(typeof physical==='string' && safeHostPath(physical).toLowerCase()===path.toLowerCase(),
+    'HOST_PATH_NOT_SHARED',
+    'Background Host storage must be visible outside this terminal app. Use a non-virtualized directory under your user profile; retain existing identity files and do not re-pair.');
+}
 
 // Same current-user + SYSTEM allow-list as the durable-task credential store.
 // Applied BEFORE secrets are created; mode=0600 is not an ACL on Windows.

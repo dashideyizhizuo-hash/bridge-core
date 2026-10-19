@@ -15,6 +15,7 @@ import { createDirectPairingClaimHandler } from '../src/cloudflare/direct-pairin
 import { loginForHostPairing } from '../src/host-login.mjs';
 import { setupHost } from '../src/host-onboarding.mjs';
 import { readDirectRunnerEnv } from '../src/direct-connect-client.mjs';
+import {BridgeError} from '../src/errors.mjs';
 
 // Only the WorkerEntrypoint host binding is shimmed. OAuth discovery,
 // registration, PKCE, authorization code exchange, token crypto and bearer
@@ -29,7 +30,7 @@ finally { hooks.deregister(); }
 
 const origin='https://bridge.example';
 const endpoint=origin+'/mcp';
-function fixture() {
+function fixture({pairingError,mutateReceipt=value=>value}={}) {
   const entries=new Map(),hosts=new Map(),requests=[],background=[];
   const principal=createBridgePrincipal({bridgeUserId:'bridge-user-integration',externalProvider:'https://github.com/',
     externalSubject:'9001',githubUserId:'9001'});
@@ -61,7 +62,7 @@ function fixture() {
       assert.equal(context.props.bridgePrincipal.bridgeUserId,principal.bridgeUserId);
       const fail=()=>{throw new Error('Unexpected gateway method in host-only login test');};
       const mcp=createBridgeMcpHandler({gateway:{discover:fail,getRun:fail,getResult:fail,publish:fail,
-        run:async input=>{assert.deepEqual(input,{mode:'connect'});return pairing.create({principal:context.props.bridgePrincipal});}}});
+        run:async input=>{assert.deepEqual(input,{mode:'connect'});if(pairingError)throw pairingError;return mutateReceipt(await pairing.create({principal:context.props.bridgePrincipal}));}}});
       try {return await mcp.fetch(request);} finally {await mcp.close();}
     }},
     defaultHandler:{async fetch(request,activeEnv) {
@@ -134,4 +135,34 @@ test('browser denial does not create a Host or print remote error descriptions',
       redirect.searchParams.set('error_description','secret-do-not-print');
     })}),error=>error.code==='HOST_LOGIN_DENIED' && !error.message.includes('secret-do-not-print'));
   assert.equal(f.hosts.size,0);assert.equal(f.requests.some(r=>r.path==='/oauth/token'),false);
+});
+
+test('pairing errors retain only a bounded public error code, never remote text or secrets',async()=>{
+  const f=fixture({pairingError:new BridgeError('BILLING_ACCOUNT_MISSING','private remote message hp1.secret', {secret:'secret-token'})});
+  await assert.rejects(loginForHostPairing({endpoint,fetchImpl:f.fetchImpl,openBrowser:false,timeoutMs:5000,
+    onAuthorization:f.onAuthorization}),error=>{
+    assert.equal(error.code,'BILLING_ACCOUNT_MISSING');
+    assert.doesNotMatch(error.message,/private|hp1|secret/);assert.equal(error.details,undefined);return true;
+  });
+  assert.equal(f.hosts.size,0);
+});
+
+test('invalid pairing receipt identifies fields without reflecting token or remote values',async()=>{
+  const f=fixture({mutateReceipt:value=>({...value,endpoint:'https://untrusted.example/mcp',expiresAt:1})});
+  await assert.rejects(loginForHostPairing({endpoint,fetchImpl:f.fetchImpl,openBrowser:false,timeoutMs:5000,
+    onAuthorization:f.onAuthorization}),error=>{
+    assert.equal(error.code,'HOST_PAIRING_INVALID');assert.deepEqual(error.details,{invalidFields:['endpoint','expiresAt']});
+    assert.doesNotMatch(JSON.stringify(error.details),/untrusted|hp1\./);return true;
+  });
+  assert.equal(f.hosts.size,0);
+});
+
+test('pairing rejects malformed upstream error codes without echoing them',async()=>{
+  const f=fixture({pairingError:new BridgeError('unsafe code hp1.secret','remote private text')});
+  await assert.rejects(loginForHostPairing({endpoint,fetchImpl:f.fetchImpl,openBrowser:false,timeoutMs:5000,
+    onAuthorization:f.onAuthorization}),error=>{
+    assert.equal(error.code,'HOST_PAIRING_REJECTED');assert.equal(error.details,undefined);
+    assert.doesNotMatch(error.message,/unsafe|hp1|private|remote/);return true;
+  });
+  assert.equal(f.hosts.size,0);
 });

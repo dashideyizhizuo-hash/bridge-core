@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { BridgeError, assertBridge } from './errors.mjs';
 import { hostServicePaths, preflightHostService, installHostService, hostServiceStatus, stopHostService, setHostServiceAutostart, stageHostRuntime } from './host-service.mjs';
 import { nativeServicePaths, preflightNativeService, installNativeService, nativeServiceStatus, stopNativeService, setNativeServiceAutostart } from './host-native-service.mjs';
-import { ensureHostDirectory, writeHostFile } from './host-files.mjs';
+import { ensureHostDirectory, writeHostFile, assertSharedHostPath } from './host-files.mjs';
 import { readRuntimeStatus } from './host-runtime-status.mjs';
 
 function adapter(configDir,options={}) {
@@ -59,9 +59,11 @@ export function preparePersistence(configDir,{mode='auto',...options}={}) {
   }
   try {
     assertBridge(impl,'HOST_SERVICE_UNSUPPORTED','No background adapter for this platform');
+    assertSharedHostPath(configDir,options);
     impl.preflight();
     const runtimePaths=hostServicePaths(configDir,options);
     const daemonPath=stageHostRuntime(runtimePaths,options);
+    for(const path of [runtimePaths.runtimeRoot,daemonPath,process.execPath])assertSharedHostPath(path,options);
     return {mode:'background',adapter:impl.id,install:details=>impl.install({...details,daemonPath,
       startupStatus:()=>{
         const state=readRuntimeStatus(configDir);

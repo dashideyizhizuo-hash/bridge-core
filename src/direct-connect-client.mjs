@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { BridgeError, assertBridge } from './errors.mjs';
 import { validateHostPolicy } from './validate.mjs';
 import { hostEndpoint, boundedHostFetch } from './host-http.mjs';
-import { ensureHostDirectory, writeHostFile } from './host-files.mjs';
+import { ensureHostDirectory, writeHostFile, defaultHostConfigDirectory, assertSharedHostPath } from './host-files.mjs';
 
 function endpoint(value) {
   try { return hostEndpoint(value); }
@@ -21,16 +21,16 @@ function pairingToken(value) {
   return value;
 }
 function defaultConfigDir() {
-  return resolve(process.env.XDG_CONFIG_HOME || (process.platform==='win32' ? process.env.LOCALAPPDATA || resolve(homedir(),'AppData/Local') : resolve(homedir(),'.config')),'bridge');
+  return defaultHostConfigDirectory();
 }
 function defaultStateDir(configDir) {
   if(process.platform==='win32' && !process.env.XDG_STATE_HOME) return resolve(configDir,'direct-exec');
   return resolve(process.env.XDG_STATE_HOME || (process.platform==='win32' ? process.env.LOCALAPPDATA || resolve(homedir(),'AppData/Local') : resolve(homedir(),'.local','state')),'bridge','direct-exec');
 }
 const atomicSecretWrite=writeHostFile;
-function minimalPolicy(hostId,configDir) {
-  const user=userInfo().username;
-  assertBridge(user!=='root','DIRECT_CONNECT_DENIED','self-service connect must not run as root');
+function minimalPolicy(hostId,configDir,owner) {
+  const user=owner.username;
+  assertBridge(owner.uid!==0 && user!=='root','DIRECT_CONNECT_DENIED','self-service connect must not run as root');
   const stateDir=defaultStateDir(configDir);
   return {version:1,host:{id:hostId},repositories:{},directExec:{
     enabled:true,serviceUser:user,root:homedir(),stateDir,assetDir:resolve(stateDir,'assets'),
@@ -45,13 +45,16 @@ function assertAbsent(path) {
 
 export async function connectDirectHost({endpoint:valueEndpoint,pairingToken:valuePairingToken,
   expectedHostId,configDir=defaultConfigDir(),fetchImpl=globalThis.fetch,
-  randomToken=()=>randomBytes(32).toString('base64url')
+  randomToken=()=>randomBytes(32).toString('base64url'),user=userInfo(),
+  sharedStorage=false,platform=process.platform,realpath
 }={}) {
   assertBridge(typeof fetchImpl==='function' && typeof randomToken==='function',
     'DIRECT_CONNECT_INVALID','fetch implementation and random token generator are required');
   const bridge=endpoint(valueEndpoint);
   const pair=pairingToken(valuePairingToken);
-  const policy=minimalPolicy('pending',configDir); // Reject root before consuming a one-use capability.
+  const policy=minimalPolicy('pending',configDir,user);
+  // Validate all local settings before consuming the one-use remote claim.
+  validateHostPolicy(policy);
   if(expectedHostId!==undefined) assertBridge(typeof expectedHostId==='string' && /^[A-Za-z0-9_.-]{1,128}$/.test(expectedHostId),
     'DIRECT_CONNECT_INVALID','expected host identity is invalid');
   const dir=resolve(configDir);
@@ -68,6 +71,10 @@ export async function connectDirectHost({endpoint:valueEndpoint,pairingToken:val
   // Initialize the configuration ACL before nested state creates its parent.
   // Protect execution journals/assets before consuming pairing or writing secrets.
   ensureHostDirectory(policy.directExec.stateDir);
+  if(sharedStorage) {
+    for(const path of [dir,policy.directExec.root,policy.directExec.stateDir,policy.directExec.assetDir,policy.directExec.exportDir].filter(Boolean))
+      assertSharedHostPath(path,{platform,realpath});
+  }
   const runnerToken=randomToken();
   assertBridge(typeof runnerToken==='string' && /^[A-Za-z0-9_-]{40,128}$/.test(runnerToken),
     'DIRECT_CONNECT_INVALID','local runner token generator returned invalid material');
