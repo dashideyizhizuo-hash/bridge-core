@@ -21,7 +21,7 @@ function fixture(t){
     requestId:request.requestId,status:'SUCCEEDED',evidence:{stdout:'saved result',stderr:''}}});
   return {hostPolicyPath,request};
 }
-function start(t,steps,{pollMs=5000}={}){
+function start(t,steps,{pollMs}={}){
   const f=fixture(t),controller=new AbortController(),events=[];let claims=0;
   t.mock.timers.enable({apis:['setTimeout','Date'],now:Date.now()});
   const running=runDirectRunnerLoop({endpoint:'https://bridge.example',token:TOKEN,hostPolicyPath:f.hostPolicyPath,
@@ -31,42 +31,67 @@ function start(t,steps,{pollMs=5000}={}){
       if(path.endsWith('/complete'))return Response.json({ok:true});
       assert.ok(path.endsWith('/claim'),'idle optimization must not change active heartbeat protocol');
       const step=steps[claims++]??'idle';
+      if(step==='paused')return Response.json({error:{code:'DIRECT_HOST_PAUSED'}},{status:423});
+      if(step==='denied')return Response.json({error:{code:'DIRECT_RUNNER_DENIED'}},{status:403});
       if(step==='error')return Response.json({error:{code:'TEMPORARY_FAILURE'}},{status:503});
       if(step==='run')return Response.json({runId:'dx1:host-polling:'+f.request.requestId,request:f.request,leaseOwner:'owner-fixture',leaseExpiresAt:Date.now()+90000});
       return new Response(null,{status:204});
     }});
-  t.after(async()=>{controller.abort();await running;t.mock.timers.reset();});
+  t.after(async()=>{controller.abort();await running.catch(()=>{});t.mock.timers.reset();});
   return {events,controller,running,claims:()=>claims,async tick(ms){t.mock.timers.tick(ms);await flush();}};
 }
 
-test('idle claims wait 5, 10, 15 seconds then stay capped; abort interrupts the wait',async t=>{
+test('idle stays hot for five minutes, doubles at both activity boundaries and caps at sixty claims per hour',async t=>{
   const f=start(t,[]);await flush();assert.equal(f.claims(),1);
-  for(const [wait,count]of [[5000,2],[10000,3],[15000,4],[15000,5]]){
-    await f.tick(wait-1);assert.equal(f.claims(),count-1);await f.tick(1);assert.equal(f.claims(),count);
+  for(let n=1;n<=20;n++){
+    await f.tick(14999);assert.equal(f.claims(),n);await f.tick(1);assert.equal(f.claims(),n+1);
   }
+  for(let n=1;n<=10;n++){
+    await f.tick(29999);assert.equal(f.claims(),20+n);await f.tick(1);assert.equal(f.claims(),21+n);
+  }
+  await f.tick(59999);assert.equal(f.claims(),31);await f.tick(1);assert.equal(f.claims(),32);
+  for(let minute=0;minute<60;minute++)await f.tick(60000);
+  assert.equal(f.claims(),92,'steady idle performs sixty claims per simulated hour');
   f.controller.abort();assert.equal((await f.running).status,'STOPPED');
-  await f.tick(60000);assert.equal(f.claims(),5);
+  await f.tick(60000);assert.equal(f.claims(),92);
 });
 
-test('finished work claims immediately and resets the next idle wait',async t=>{
-  const f=start(t,['idle','idle','run','idle']);await flush();
-  await f.tick(5000);await f.tick(10000);
-  assert.equal(f.claims(),4);
+test('work after long inactivity immediately claims again and resets the entire five-minute hot window',async t=>{
+  const steps=[],f=start(t,steps);await flush();
+  for(let n=0;n<20;n++)await f.tick(15000);for(let n=0;n<10;n++)await f.tick(30000);
+  steps[f.claims()]='run';await f.tick(60000);
+  assert.equal(f.claims(),33);
   const complete=f.events.findIndex(event=>event.path.endsWith('/complete'));
   assert.ok(complete>=0);assert.equal(f.events[complete+1].time,f.events[complete].time);
-  await f.tick(4999);assert.equal(f.claims(),4);await f.tick(1);assert.equal(f.claims(),5);
+  for(let n=0;n<20;n++){await f.tick(14999);assert.equal(f.claims(),33+n);await f.tick(1);assert.equal(f.claims(),34+n);}
+  await f.tick(29999);assert.equal(f.claims(),53);await f.tick(1);assert.equal(f.claims(),54);
 });
 
-test('network error retry backoff is separate and a successful retry restarts idle pacing',async t=>{
-  const f=start(t,['idle','idle','error','error','idle']);await flush();
-  await f.tick(5000);await f.tick(10000);assert.equal(f.claims(),3);
-  await f.tick(999);assert.equal(f.claims(),3);await f.tick(1);assert.equal(f.claims(),4);
-  await f.tick(1999);assert.equal(f.claims(),4);await f.tick(1);assert.equal(f.claims(),5);
-  await f.tick(4999);assert.equal(f.claims(),5);await f.tick(1);assert.equal(f.claims(),6);
+test('network retries use separate exponential delays without resetting the long-idle activity clock',async t=>{
+  const steps=[],f=start(t,steps);await flush();
+  for(let n=0;n<20;n++)await f.tick(15000);for(let n=0;n<10;n++)await f.tick(30000);
+  steps[f.claims()]='error';steps[f.claims()+1]='error';steps[f.claims()+2]='error';
+  await f.tick(60000);assert.equal(f.claims(),32);
+  for(const [wait,count]of [[1000,33],[2000,34],[4000,35]]){await f.tick(wait-1);assert.equal(f.claims(),count-1);await f.tick(1);assert.equal(f.claims(),count);}
+  await f.tick(59999);assert.equal(f.claims(),35);await f.tick(1);assert.equal(f.claims(),36);
 });
 
 test('an explicit slower poll interval is preserved rather than silently increased in frequency',async t=>{
   const f=start(t,[],{pollMs:30000});await flush();
   await f.tick(29999);assert.equal(f.claims(),1);await f.tick(1);assert.equal(f.claims(),2);
-  await f.tick(30000);assert.equal(f.claims(),3);
+  for(let n=0;n<9;n++)await f.tick(30000);assert.equal(f.claims(),11);
+  await f.tick(59999);assert.equal(f.claims(),11);await f.tick(1);assert.equal(f.claims(),12);
+});
+
+test('owner pause stays in the foreground loop, contacts once a minute and resumes new work',async t=>{
+  const f=start(t,['paused','paused','run','idle']);await flush();assert.equal(f.claims(),1);
+  await f.tick(59999);assert.equal(f.claims(),1);await f.tick(1);assert.equal(f.claims(),2);
+  await f.tick(60000);assert.equal(f.claims(),4);
+  assert.equal(f.events.filter(e=>e.path.endsWith('/complete')).length,1);
+  await f.tick(14999);assert.equal(f.claims(),4);await f.tick(1);assert.equal(f.claims(),5);
+});
+
+test('bad or revoked credentials still terminate the loop after a healthy owner pause',async t=>{
+  const f=start(t,['paused','denied']);const rejected=assert.rejects(f.running,e=>e.status===403&&e.code==='DIRECT_RUNNER_DENIED');
+  await flush();await f.tick(60000);await rejected;await f.tick(120000);assert.equal(f.claims(),2);
 });

@@ -68,6 +68,24 @@ function failure(error,status=400,{cors=false}={}) {
   );
 }
 
+// Retain the bounded buffer until consumption/cancellation. Rechecking
+// permission after R2 must happen before any file bytes are exposed.
+async function runnerDownloadResponse(operation,signal) {
+  let lease;
+  let {bytes,headers}=await withDirectAssetBufferSlot(operation,{signal,retain:value=>{lease=value;}});
+  let sent=false,controller,released=false;
+  const release=()=>{if(!released){released=true;bytes=null;lease.signal.removeEventListener('abort',abort);lease.release();}};
+  const abort=()=>{try{controller.error(new Error('File response canceled or timed out'));}finally{release();}};
+  const body=new ReadableStream({
+    start(value){controller=value;},
+    pull(value){if(!sent){sent=true;value.enqueue(bytes);bytes=null;}else{release();value.close();}},
+    cancel(){release();}
+  },{highWaterMark:0});
+  lease.signal.addEventListener('abort',abort,{once:true});
+  if(lease.signal.aborted)abort();
+  return new Response(body,{status:200,headers});
+}
+
 export function createDirectAssetHandler({
   store,
   bucket,
@@ -302,7 +320,7 @@ export function createDirectAssetHandler({
         } catch(error) {
           const status=
             error?.code==='DIRECT_ASSET_BUSY' ? 429 :
-            error?.code==='DIRECT_RUNNER_DENIED' || error?.code==='DIRECT_EXPORT_DENIED' ? 403 :
+            error?.code==='DIRECT_RUNNER_DENIED' || error?.code==='DIRECT_HOST_PAUSED' || error?.code==='DIRECT_EXPORT_DENIED' ? 403 :
             error?.code==='DIRECT_RUN_STALE' || error?.code==='DIRECT_EXPORT_CONFLICT' ? 409 :
             error?.code==='DIRECT_EXPORT_INVALID' || error?.code==='DIRECT_ASSET_INVALID' ? 400 :
             500;
@@ -326,17 +344,11 @@ export function createDirectAssetHandler({
         }
         try {
           const runnerTokenSha256=await sha256HexText(token);
-          const asset=await store.authorizeRunnerDownload({
-            hostId,
-            runnerTokenSha256,
-            assetId:runnerAssetId,
-            runId,
-            leaseOwner
-          });
-          const object=await bucket.get(asset.objectKey);
-          if(object===null) {
-            throw new BridgeError('DIRECT_ASSET_MISSING','asset object is missing');
-          }
+          const authorizeDownload=async()=>{
+            if(typeof directExecStore?.assertRunner==='function')await directExecStore.assertRunner({hostId,runnerTokenSha256,signalPaused:true});
+            return store.authorizeRunnerDownload({hostId,runnerTokenSha256,assetId:runnerAssetId,runId,leaseOwner});
+          };
+          const asset=await authorizeDownload();
           const headers=new Headers({
             'cache-control':'private, no-store',
             'content-type':asset.mimeType,
@@ -345,10 +357,20 @@ export function createDirectAssetHandler({
             'x-bridge-sha256':asset.sha256,
             'x-bridge-file-name':encodeURIComponent(asset.fileName)
           });
-          return new Response(object.body,{status:200,headers});
+          return await runnerDownloadResponse(async(signal)=>{
+            const object=await bucket.get(asset.objectKey);
+            if(object===null)throw new BridgeError('DIRECT_ASSET_MISSING','asset object is missing');
+            const bytes=await readBoundedBody(new Response(object.body,{headers:{'content-length':String(asset.sizeBytes)}}),
+              {maxBytes:Math.min(asset.sizeBytes,DIRECT_ASSET_MAX_BYTES),signal,code:'DIRECT_ASSET_INTEGRITY',message:'asset size mismatch'});
+            if(bytes.byteLength!==asset.sizeBytes||await sha256HexBytes(bytes)!==asset.sha256)throw new BridgeError('DIRECT_ASSET_INTEGRITY','asset integrity mismatch');
+            await authorizeDownload();
+            signal.throwIfAborted();
+            return {bytes,headers};
+          },request.signal);
         } catch(error) {
           const status=
-            error?.code==='DIRECT_ASSET_DENIED' ? 403 :
+            error?.code==='DIRECT_ASSET_BUSY' ? 429 :
+            error?.code==='DIRECT_ASSET_DENIED' || error?.code==='DIRECT_RUNNER_DENIED' || error?.code==='DIRECT_HOST_PAUSED' ? 403 :
             error?.code==='DIRECT_ASSET_MISSING' ? 404 :
             500;
           return failure(error,status);

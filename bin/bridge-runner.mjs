@@ -80,7 +80,7 @@ try {
       : null;
     const endpoint=values.endpoint ?? fileEnv?.endpoint ?? process.env.BRIDGE_PUBLIC_URL;
     const token=fileEnv?.token ?? process.env.BRIDGE_DIRECT_RUNNER_TOKEN;
-    const pollMs=values['poll-ms']===undefined ? 5000 : Number(values['poll-ms']);
+    const pollMs=values['poll-ms']===undefined ? 15000 : Number(values['poll-ms']);
     const result=await runDirectRunnerLoop({
       endpoint,
       token,

@@ -64,9 +64,9 @@ class FakeStatement {
       return {success:true,meta:{changes:1}};
     }
     if(this.sql.startsWith('UPDATE direct_hosts SET last_seen_at=')) {
-      const [lastSeenAt,hostId,token]=this.args;
+      const [lastSeenAt,hostId,token,allowPaused]=this.args;
       const host=this.db.hosts.get(hostId);
-      if(!host || host.token!==token || host.enabled!==1) return {success:true,meta:{changes:0}};
+      if(!host || host.token!==token || (!allowPaused && host.enabled!==1)) return {success:true,meta:{changes:0}};
       host.lastSeenAt=lastSeenAt;
       return {success:true,meta:{changes:1}};
     }
@@ -154,11 +154,11 @@ class FakeStatement {
         ? {host_id:hostId}
         : null;
     }
-    if(this.sql.startsWith('SELECT host_id, last_seen_at FROM direct_hosts')) {
+    if(this.sql.startsWith('SELECT h.host_id, h.bridge_user_id, h.enabled, h.last_seen_at FROM direct_hosts')) {
       const [hostId,token]=this.args;
       const host=this.db.hosts.get(hostId);
-      return host && host.token===token && host.enabled===1
-        ? {host_id:hostId,last_seen_at:host.lastSeenAt}
+      return host && host.token===token
+        ? {host_id:hostId,bridge_user_id:host.bridgeUserId,enabled:host.enabled,last_seen_at:host.lastSeenAt}
         : null;
     }
     if(this.sql.startsWith('SELECT request_id, run_id, host_id, status, created_at')) {

@@ -356,16 +356,31 @@ export class D1DirectExecStore {
     return {...result,runId:row.run_id,kind:'direct',transport:'direct'};
   }
 
-  async assertRunner({hostId:value,runnerTokenSha256}={}) {
+  // Applications with account tombstones must override this hook. The base
+  // query already requires an extant owner; no paused contact grants execution.
+  async assertRunnerOwnerActive(_row) {}
+
+  async recordRunnerContact({host,token,now,allowPausedContact}) {
+    await this.db.prepare(`UPDATE direct_hosts SET last_seen_at=?
+      WHERE host_id=? AND runner_token_sha256=? AND (?=1 OR enabled=1)
+      AND EXISTS(SELECT 1 FROM bridge_users u WHERE u.id=direct_hosts.bridge_user_id)`)
+      .bind(now,host,token,allowPausedContact?1:0).run();
+  }
+
+  async assertRunner({hostId:value,runnerTokenSha256,allowPausedContact=false,signalPaused=false}={}) {
     const host=hostId(value);
     const token=tokenHash(runnerTokenSha256);
     const row=await this.db.prepare(
-      `SELECT host_id, last_seen_at
-       FROM direct_hosts
-       WHERE host_id = ? AND runner_token_sha256 = ? AND enabled = 1
+      `SELECT h.host_id, h.bridge_user_id, h.enabled, h.last_seen_at
+       FROM direct_hosts h JOIN bridge_users u ON u.id=h.bridge_user_id
+       WHERE h.host_id = ? AND h.runner_token_sha256 = ?
        LIMIT 1`
     ).bind(host,token).first();
     assertBridge(row,'DIRECT_RUNNER_DENIED','runner authentication failed');
+    await this.assertRunnerOwnerActive(row);
+    const enabled=Number(row.enabled)===1;
+    const denial=signalPaused||allowPausedContact?'DIRECT_HOST_PAUSED':'DIRECT_RUNNER_DENIED';
+    if(!enabled&&!allowPausedContact)assertBridge(false,denial,'Host execution is paused by its owner');
 
     const now=this.clock();
     if(
@@ -373,12 +388,10 @@ export class D1DirectExecStore {
       row.last_seen_at===undefined ||
       Number(row.last_seen_at)<=now-HOST_SEEN_WRITE_INTERVAL_MS
     ) {
-      await this.db.prepare(
-        `UPDATE direct_hosts
-         SET last_seen_at=?
-         WHERE host_id=? AND runner_token_sha256=? AND enabled=1`
-      ).bind(now,host,token).run();
+      await this.recordRunnerContact({host,token,now,allowPausedContact});
     }
+    await this.assertRunnerOwnerActive(row);
+    assertBridge(enabled,denial,'Host execution is paused by its owner');
     return host;
   }
 
@@ -388,7 +401,7 @@ export class D1DirectExecStore {
     leaseOwner:valueOwner,
     leaseMs=60_000
   }={}) {
-    const host=await this.assertRunner({hostId:value,runnerTokenSha256});
+    const host=await this.assertRunner({hostId:value,runnerTokenSha256,allowPausedContact:true});
     const owner=leaseOwner(valueOwner);
     assertBridge(
       Number.isInteger(leaseMs) && leaseMs>=5_000 && leaseMs<=3_700_000,
@@ -464,7 +477,7 @@ export class D1DirectExecStore {
     runId,
     leaseMs=60_000
   }={}) {
-    const host=await this.assertRunner({hostId:value,runnerTokenSha256});
+    const host=await this.assertRunner({hostId:value,runnerTokenSha256,signalPaused:true});
     const owner=leaseOwner(valueOwner);
     const parsed=parseDirectRunId(runId);
     assertBridge(parsed.hostId===host,'DIRECT_RUN_INVALID','run host binding mismatch');
@@ -496,7 +509,7 @@ export class D1DirectExecStore {
     runId,
     exportIndex
   }={}) {
-    const host=await this.assertRunner({hostId:value,runnerTokenSha256});
+    const host=await this.assertRunner({hostId:value,runnerTokenSha256,signalPaused:true});
     const owner=leaseOwner(valueOwner);
     const parsed=parseDirectRunId(runId);
     assertBridge(parsed.hostId===host,'DIRECT_RUN_INVALID','run host binding mismatch');
@@ -538,7 +551,7 @@ export class D1DirectExecStore {
     runId,
     result
   }={}) {
-    const host=await this.assertRunner({hostId:value,runnerTokenSha256});
+    const host=await this.assertRunner({hostId:value,runnerTokenSha256,signalPaused:true});
     const owner=leaseOwner(valueOwner);
     const parsed=parseDirectRunId(runId);
     assertBridge(parsed.hostId===host,'DIRECT_RUN_INVALID','run host binding mismatch');

@@ -31,8 +31,11 @@ async function jsonBody(request,{maxBytes=1_600_000}={}) {
   }
 }
 
-function statusFor(error) {
+function statusFor(error,path) {
   if(error?.code==='DIRECT_RUNNER_DENIED') return 403;
+  // Existing Hosts cancel active execution on 409; a claim's 423 is retryable
+  // without the credential-failure daemon restart behavior.
+  if(error?.code==='DIRECT_HOST_PAUSED') return path===DIRECT_RUNNER_CLAIM_PATH?423:409;
   if(error?.code==='DIRECT_RUN_STALE') return 409;
   if(error?.code==='DIRECT_RUN_INVALID' || error?.code==='DIRECT_HOST_INVALID') return 400;
   return 500;
@@ -116,7 +119,7 @@ export function createDirectRunnerHandler({store,randomUUID=()=>globalThis.crypt
       } catch(error) {
         return Response.json(
           {error:errorEnvelope(error)},
-          {status:statusFor(error),headers:{'cache-control':'no-store'}}
+          {status:statusFor(error,url.pathname),headers:{'cache-control':'no-store'}}
         );
       }
     }

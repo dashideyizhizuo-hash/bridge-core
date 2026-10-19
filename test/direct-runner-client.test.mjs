@@ -224,7 +224,7 @@ test('unfinished local journal refuses automatic side-effect replay',async()=>{
   }
 });
 
-test('heartbeat authorization loss aborts a running process group',async()=>{
+for(const paused of [false,true])test((paused?'owner pause':'authorization loss')+' aborts a running process group',async()=>{
   const f=hostFixture();
   try {
     let heartbeatCount=0;
@@ -241,15 +241,15 @@ test('heartbeat authorization loss aborts a running process group',async()=>{
       if(path==='/direct/runner/heartbeat') {
         heartbeatCount++;
         return Response.json(
-          {error:{code:'DIRECT_RUNNER_DENIED',message:'disabled'}},
-          {status:403}
+          {error:{code:paused?'DIRECT_HOST_PAUSED':'DIRECT_RUNNER_DENIED',message:'disabled'}},
+          {status:paused?409:403}
         );
       }
       if(path==='/direct/runner/complete') {
         completed=JSON.parse(init.body).result;
         return Response.json(
-          {error:{code:'DIRECT_RUNNER_DENIED',message:'disabled'}},
-          {status:403}
+          {error:{code:paused?'DIRECT_HOST_PAUSED':'DIRECT_RUNNER_DENIED',message:'disabled'}},
+          {status:paused?409:403}
         );
       }
       throw new Error('unexpected '+path);
@@ -264,13 +264,13 @@ test('heartbeat authorization loss aborts a running process group',async()=>{
         heartbeatMs:1_000,
         fetchImpl
       }),
-      /HTTP 403/
+      error=>error.status===(paused?409:403)
     );
     assert.ok(heartbeatCount>=1);
     assert.equal(completed,undefined,'revoked leases must not start a completion upload');
     const recorded=JSON.parse(readFileSync(join(f.stateDir,'host-main','direct-1234','result.json'),'utf8')).result;
     assert.equal(recorded.status,'FAILED');
-    assert.equal(recorded.error.code,'DIRECT_RUNNER_DENIED');
+    assert.equal(recorded.error.code,paused?'DIRECT_HOST_PAUSED':'DIRECT_RUNNER_DENIED');
   } finally {
     f.cleanup();
   }
@@ -463,6 +463,17 @@ test('authorization loss during asset preparation prevents command execution',as
     const recorded=JSON.parse(readFileSync(join(f.stateDir,'host-main','direct-1234','result.json'),'utf8')).result;
     assert.equal(recorded.error.code,'DIRECT_RUNNER_DENIED');
   } finally {f.cleanup();}
+});
+
+test('explicit file pause skips command and completion, preserving pause response identity',async()=>{
+  const f=hostFixture();try{
+    const request={schemaVersion:1,requestId:'direct-1234',hostId:'host-main',argv:['must-not-start'],
+      assets:[{assetId:'asset-12345678',fileName:'input.txt',mimeType:'text/plain',sizeBytes:1,sha256:'a'.repeat(64)}]};
+    const calls=[];await assert.rejects(runDirectRunnerOnce({endpoint:'https://bridge.example',token:TOKEN,hostPolicyPath:f.hostPolicyPath,
+      fetchImpl:async(url)=>{const path=new URL(url).pathname;calls.push(path);if(path.endsWith('/claim'))return Response.json({request,runId:'dx1:host-main:direct-1234',leaseOwner:'runner:pause-fixture'});
+        if(path.includes('/assets/'))return Response.json({error:{code:'DIRECT_HOST_PAUSED'}},{status:403});throw Error('must not complete or export');}}),e=>e.code==='DIRECT_HOST_PAUSED'&&e.status===403);
+    assert.equal(calls.length,2);assert.ok(!calls.some(p=>p.endsWith('/complete')||p.includes('/exports/')));
+  }finally{f.cleanup();}
 });
 
 test('large failed output is serialized once and stays below the completion limit',async()=>{

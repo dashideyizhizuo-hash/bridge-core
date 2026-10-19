@@ -14,6 +14,27 @@ const sha=createHash('sha256').update(bytes).digest('hex');
 const UPLOAD='upload_token_abcdefghijklmnopqrstuvwxyz123456';
 const RUNNER='runner_token_abcdefghijklmnopqrstuvwxyz123456';
 
+for(const phase of ['initial','buffered'])test('paused runner download '+phase+' denies private bytes',async()=>{
+  let paused=phase==='initial',reads=0;
+  const handler=createDirectAssetHandler({store:serviceStore({async authorizeUpload(){},async markReady(){},
+    async authorizeRunnerDownload(){return {assetId:'asset-12345678',objectKey:'direct-assets/asset-12345678',fileName:'art.png',mimeType:'image/png',sizeBytes:bytes.length,sha256:sha};}}),
+    directExecStore:{async authorizeExportUpload(){throw Error('unused');},async assertRunner(input){assert.equal(input.signalPaused,true);assert.equal(input.runnerTokenSha256,await hashText(RUNNER));if(paused)throw new BridgeError('DIRECT_HOST_PAUSED','paused');}},
+    bucket:{async put(){throw Error('must not write');},async get(){reads++;paused=true;return {body:bytes};},async delete(){}}
+  });
+  const response=await handler.fetch(new Request('https://bridge.example/direct/runner/assets/asset-12345678',{headers:{authorization:'Bearer '+RUNNER,'x-bridge-host-id':'host-main','x-bridge-run-id':'dx1:host-main:direct-12345678','x-bridge-lease-owner':'runner:lease-1234'}}));
+  assert.equal(response.status,403);assert.equal((await response.json()).error.code,'DIRECT_HOST_PAUSED');assert.equal(reads,phase==='initial'?0:1);
+});
+
+for(const phase of ['initial','buffered'])test('paused runner export '+phase+' writes no R2 object or asset',async()=>{
+  let authorizations=0,writes=0;
+  const handler=createDirectAssetHandler({store:serviceStore({async authorizeUpload(){},async markReady(){},async authorizeRunnerDownload(){}}),
+    directExecStore:{async authorizeExportUpload(){if(phase==='initial'||++authorizations>1)throw new BridgeError('DIRECT_HOST_PAUSED','paused');return {bridgeUserId:'u',fileName:'art.png',mimeType:'image/png',maxBytes:1024};}},
+    bucket:{async put(){writes++;},async get(){return null;},async delete(){}}
+  });
+  const response=await handler.fetch(new Request('https://bridge.example/direct/runner/exports/'+encodeURIComponent('dx1:host-main:direct-12345678')+'/0',{method:'PUT',headers:{authorization:'Bearer '+RUNNER,'x-bridge-host-id':'host-main','x-bridge-lease-owner':'runner:lease-1234','x-bridge-sha256':sha,'content-length':String(bytes.length)},body:bytes}));
+  assert.equal(response.status,403);assert.equal((await response.json()).error.code,'DIRECT_HOST_PAUSED');assert.equal(writes,0);
+});
+
 async function hashText(value) {
   return createHash('sha256').update(value).digest('hex');
 }

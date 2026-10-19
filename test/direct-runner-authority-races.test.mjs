@@ -14,7 +14,7 @@ function fixture(t){
   sql.exec("PRAGMA foreign_keys=ON; CREATE TABLE bridge_users(id TEXT PRIMARY KEY); INSERT INTO bridge_users VALUES('user-a'),('user-b')");
   for(const name of ['0009_direct_exec.sql','0010_direct_exec_hardening.sql'])
     sql.exec(readFileSync(new URL('../migrations/'+name,import.meta.url),'utf8'));
-  let hook=null,tail=Promise.resolve();
+  let hook=null,tail=Promise.resolve(),now=1000;
   const db={prepare(q){return {bind(...args){return {
     async first(){const row=sql.prepare(q).get(...args)??null;if(hook)await hook(q,row);return row;},
     async run(){return {meta:{changes:Number(sql.prepare(q).run(...args).changes)}};},
@@ -26,16 +26,53 @@ function fixture(t){
     }catch(error){sql.exec('ROLLBACK');throw error;}});
     tail=work.catch(()=>{});return work;
   }};
-  return {sql,store:new D1DirectExecStore({db,clock:()=>1000}),setHook:value=>{hook=value;}};
+  return {sql,store:new D1DirectExecStore({db,clock:()=>now}),setNow:value=>{now=value;},setHook:value=>{hook=value;}};
 }
 async function seed(f){
   await f.store.registerHost({principal,hostId,runnerTokenSha256:hash});
   return f.store.submit({principal,hostId,request:{schemaVersion:1,requestId:'request-1234',argv:['node','--version'],exports:[{fileName:'out.txt',mimeType:'text/plain',maxBytes:100}]}});
 }
 
+test('paused contact is token/owner bound, throttled and grants neither a lease nor file authority',async t=>{
+  const f=fixture(t),run=await seed(f),input={hostId,runnerTokenSha256:hash,leaseOwner,runId:run.runId};
+  await f.store.claimNext(input);await f.store.setHostEnabled({principal,hostId,enabled:false});f.setNow(61000);
+  const paused={code:'DIRECT_HOST_PAUSED'},denied={code:'DIRECT_RUNNER_DENIED'};
+  await assert.rejects(f.store.claimNext({...input,runnerTokenSha256:'b'.repeat(64)}),denied);
+  assert.equal(f.sql.prepare('SELECT last_seen_at FROM direct_hosts').get().last_seen_at,1000);
+  await assert.rejects(f.store.claimNext(input),paused);
+  assert.equal(f.sql.prepare('SELECT last_seen_at FROM direct_hosts').get().last_seen_at,61000);
+  f.setNow(70000);await assert.rejects(f.store.claimNext(input),paused);
+  assert.equal(f.sql.prepare('SELECT last_seen_at FROM direct_hosts').get().last_seen_at,61000);
+  f.setNow(122000);
+  await assert.rejects(f.store.renewLease(input),paused);await assert.rejects(f.store.complete({...input,result:{}}),paused);
+  await assert.rejects(f.store.assertRunner(input),denied);await assert.rejects(f.store.authorizeExportUpload({...input,exportIndex:0}),paused);
+  assert.equal(f.sql.prepare('SELECT last_seen_at FROM direct_hosts').get().last_seen_at,61000);
+  const row=f.sql.prepare('SELECT status,lease_owner,lease_expires_at FROM direct_runs').get();assert.equal(row.status,'CANCELED');assert.equal(row.lease_owner,null);assert.equal(row.lease_expires_at,null);
+  await f.store.setHostEnabled({principal,hostId,enabled:true});assert.equal(await f.store.claimNext(input),null);
+  await assert.rejects(f.store.renewLease(input),{code:'DIRECT_RUN_STALE'});
+  const fresh=await f.store.submit({principal,request:{schemaVersion:1,requestId:'new-after-resume',hostId,argv:['node','--version']}});
+  assert.equal((await f.store.claimNext(input)).runId,fresh.runId);
+});
+
+test('an inactive-owner hook denies paused contact before updating last seen',async t=>{
+  const f=fixture(t);await seed(f);await f.store.setHostEnabled({principal,hostId,enabled:false});f.setNow(61000);
+  f.store.assertRunnerOwnerActive=async row=>{assert.equal(row.bridge_user_id,principal.bridgeUserId);throw Object.assign(Error('Owner closed'),{code:'DIRECT_RUNNER_DENIED'});};
+  await assert.rejects(f.store.claimNext({hostId,runnerTokenSha256:hash,leaseOwner}),{code:'DIRECT_RUNNER_DENIED'});
+  assert.equal(f.sql.prepare('SELECT last_seen_at FROM direct_hosts').get().last_seen_at,null);
+});
+
+test('pause HTTP protocol preserves old-Host claim retry and active lease cancellation',async t=>{
+  const f=fixture(t),run=await seed(f);await f.store.setHostEnabled({principal,hostId,enabled:false});
+  const handler=createDirectRunnerHandler({store:f.store});
+  for(const [route,status]of [['claim',423],['heartbeat',409],['complete',409]]){
+    const response=await handler.fetch(new Request('https://example.test/direct/runner/'+route,{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:JSON.stringify({hostId,leaseOwner,runId:run.runId,result:{}})}));
+    assert.equal(response.status,status);assert.equal((await response.json()).error.code,'DIRECT_HOST_PAUSED');
+  }
+});
+
 test('rotation during HTTP claim never exposes queued command to revoked credential',async t=>{
   const f=fixture(t),run=await seed(f);
-  f.setHook(async q=>{if(q.includes('SELECT host_id, last_seen_at')){
+  f.setHook(async q=>{if(q.includes('SELECT h.host_id, h.bridge_user_id')){
     f.setHook(null);await f.store.registerHost({principal,hostId,runnerTokenSha256:'b'.repeat(64)});
   }});
   const handler=createDirectRunnerHandler({store:f.store});
@@ -56,7 +93,7 @@ test(operation+' atomically rechecks '+revocation+' after authentication',async 
     exportIndex:0,result:{requestId:'request-1234',hostId,status:'SUCCEEDED'}};
   if(operation!=='claimNext')await f.store.claimNext(input);
   const before=f.sql.prepare('SELECT * FROM direct_runs').get();
-  f.setHook(async q=>{if(q.includes('SELECT host_id, last_seen_at')){
+  f.setHook(async q=>{if(q.includes('SELECT h.host_id, h.bridge_user_id')){
     f.setHook(null);
     // Isolate credential/enable fencing from the separate run cancellation.
     if(revocation==='rotate')f.sql.prepare('UPDATE direct_hosts SET runner_token_sha256=?').run('b'.repeat(64));
