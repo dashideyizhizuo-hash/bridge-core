@@ -186,6 +186,13 @@ export async function installNativeService(paths,{daemonPath,nodePath=process.ex
   const spec={schemaVersion:1,adapter:paths.adapter,name:paths.name,configDir:paths.configDir,nodePath,daemonPath};
   if(paths.adapter==='windows-task') {
     spec.sid=hostPowerShell(TASK_SCRIPT,{operation:'probe'},options).sid;
+    // Keep historical actions byte-exact when restoring a receipt. A fresh
+    // install/explicit upgrade detaches the supervisor, rather than merely
+    // hiding its console (which a terminal host can still close).
+    const retained=receipt(paths);
+    assertBridge(!retained || retained.detachedConsole===undefined || retained.detachedConsole===true,
+      'HOST_SERVICE_CONFLICT','Unknown Windows console mode in the owned receipt');
+    if(!retained || retained.detachedConsole===true) spec.detachedConsole=true;
     spec.action=windowsAction(spec);spec.marker='Bridge Host '+hash(JSON.stringify(spec));
     saveReceipt(paths,spec);
     hostPowerShell(TASK_SCRIPT,{operation:'install',name:paths.name,spec,start},options);

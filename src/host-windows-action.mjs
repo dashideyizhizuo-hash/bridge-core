@@ -62,7 +62,32 @@ public static class BridgeHostJob {
 }
 `;
 
+const CONSOLE_SOURCE=String.raw`
+public static class BridgeHostConsole {
+  [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError=true)]
+  static extern bool FreeConsole();
+  public static void Detach() {
+    if(!FreeConsole()) throw new System.ComponentModel.Win32Exception(
+      System.Runtime.InteropServices.Marshal.GetLastWin32Error());
+  }
+  public static void Drain(System.IO.Stream stream) {
+    // Closing an inherited pipe is expected during retries. Observe the task's
+    // failure without waiting for descendants that may retain its write end.
+    var copy=stream.CopyToAsync(System.IO.Stream.Null,8192);
+    copy.ContinueWith(task => task.Exception, System.Threading.CancellationToken.None,
+      System.Threading.Tasks.TaskContinuationOptions.OnlyOnFaulted |
+      System.Threading.Tasks.TaskContinuationOptions.ExecuteSynchronously,
+      System.Threading.Tasks.TaskScheduler.Default);
+  }
+}
+`;
+
 export function windowsAction(spec) {
+  assertBridge(spec.detachedConsole===undefined || spec.detachedConsole===true,
+    'HOST_SERVICE_INVALID','Unknown Windows console mode');
+  const detached=spec.detachedConsole===true;
+  const diagnostic=message=>detached ? `try {[Console]::Error.WriteLine('${message}')} catch {}` :
+    `[Console]::Error.WriteLine('${message}')`;
   const data=Buffer.from(JSON.stringify({nodePath:spec.nodePath,configDir:spec.configDir,
     arguments:[spec.daemonPath,'--config-dir',spec.configDir].map(windowsArgument).join(' ')})).toString('base64');
   // Task Scheduler did not retry exit code 1 in native acceptance despite
@@ -73,9 +98,9 @@ $ErrorActionPreference='Stop'
 $PSModuleAutoLoadingPreference='None'
 Import-Module -Name ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Utility.psd1')) -ErrorAction Stop
 Add-Type -TypeDefinition @'
-${JOB_SOURCE}
+${JOB_SOURCE}${detached ? CONSOLE_SOURCE : ''}
 '@ -ErrorAction Stop
-[BridgeHostJob]::Attach()
+${detached ? '[BridgeHostConsole]::Detach()\n' : ''}[BridgeHostJob]::Attach()
 $p=ConvertFrom-Json ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${data}')))
 $s=[Diagnostics.ProcessStartInfo]::new()
 $s.FileName=$p.nodePath
@@ -83,23 +108,23 @@ $s.Arguments=$p.arguments
 $s.WorkingDirectory=$p.configDir
 $s.UseShellExecute=$false
 $s.CreateNoWindow=$true
-$backoffMs=5000
+${detached ? '$s.RedirectStandardOutput=$true\n$s.RedirectStandardError=$true\n' : ''}$backoffMs=5000
 while($true){
   $child=$null
-  $watch=[Diagnostics.Stopwatch]::StartNew()
+${detached ? '  $outStream=$null\n  $errStream=$null\n' : ''}  $watch=[Diagnostics.Stopwatch]::StartNew()
   try {
     $child=[Diagnostics.Process]::Start($s)
-    $child.WaitForExit()
+${detached ? '    $outStream=$child.StandardOutput.BaseStream\n    $errStream=$child.StandardError.BaseStream\n    [BridgeHostConsole]::Drain($outStream)\n    [BridgeHostConsole]::Drain($errStream)\n' : ''}    $child.WaitForExit()
     $code=$child.ExitCode
   } catch {
     $code=1
-    [Console]::Error.WriteLine('Bridge Host child could not start; retrying without re-pairing.')
+    ${diagnostic('Bridge Host child could not start; retrying without re-pairing.')}
   } finally {
-    if($null -ne $child){$child.Dispose()}
+${detached ? '    if($null -ne $outStream){try {$outStream.Dispose()} catch {}}\n    if($null -ne $errStream){try {$errStream.Dispose()} catch {}}\n' : ''}    if($null -ne $child){$child.Dispose()}
     $watch.Stop()
   }
   if($code -eq 0){exit 0}
-  [Console]::Error.WriteLine('Bridge Host child exited abnormally; retrying without re-pairing.')
+  ${diagnostic('Bridge Host child exited abnormally; retrying without re-pairing.')}
   if($watch.Elapsed.TotalSeconds -ge 60){$backoffMs=5000}
   [Threading.Thread]::Sleep($backoffMs)
   $backoffMs=[Math]::Min(30000,$backoffMs*2)

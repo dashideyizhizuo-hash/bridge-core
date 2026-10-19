@@ -38,7 +38,7 @@ function recordPid() {
   for(const pid of [value.pid,value.parent]){assert.ok(Number.isSafeInteger(pid)&&pid>0);seen.add(pid);}
   return value;
 }
-function runtime(version) {
+function runtime(version,{legacy=false}={}) {
   const source=join(root,'source-'+version);mkdirSync(source);
   for(const file of HOST_RUNTIME_FILES){const target=join(source,file);mkdirSync(dirname(target),{recursive:true});copyFileSync(join(repository,file),target);}
   const daemon=version==='broken' ? `throw new Error('isolated maintenance fixture startup failure');` : `
@@ -54,8 +54,9 @@ report({phase:'ready'});setInterval(()=>report({phase:'ready'}),1000);
   writeFileSync(join(source,'bin/bridge-host-daemon.mjs'),daemon);
   const daemonPath=stageHostRuntime(hostServicePaths(config,options),{sourceRoot:source});
   const spec={schemaVersion:1,adapter:paths.adapter,name:paths.name,configDir:config,nodePath:process.execPath,daemonPath,sid:principal.sid};
+  if(!legacy)spec.detachedConsole=true;
   spec.action=windowsAction(spec);spec.marker='Bridge Host '+createHash('sha256').update(JSON.stringify(spec)).digest('hex');knownSpecs.push(spec);
-  return {source,daemonPath};
+  return {source,daemonPath,spec};
 }
 const cleanupScript=`
 function Conflict($field='fixture'){ @{failure='HOST_SERVICE_CONFLICT';field=$field}|ConvertTo-Json -Compress;exit }
@@ -77,12 +78,15 @@ $folder.DeleteTask($d.name,0);@{removed=$true}|ConvertTo-Json -Compress
 `;
 try {
   assert.equal(nativeServiceStatus(paths).installed,false,'Never touch a pre-existing task');
-  const a=runtime('A'),b=runtime('B'),broken=runtime('broken');
+  const a=runtime('A',{legacy:true}),b=runtime('B'),broken=runtime('broken');
   writeHostFile(join(config,'host.json'),JSON.stringify({host:{id:'host-isolated-maintenance-fixture'}}));
   writeHostFile(join(config,'direct-runner.env'),'SYNTHETIC_FIXTURE_ONLY=not-a-credential\n');
   ensureHostDirectory(join(config,'direct-exec'));writeHostFile(join(config,'direct-exec/journal.json'),'{}\n');
   const identity=readFileSync(join(config,'host.json'),'utf8'),journal=readFileSync(join(config,'direct-exec/journal.json'),'utf8');
   phase='install-A';
+  // Seed a pre-detachment receipt, as restoring a published0.4.1 installation
+  // would. Later upgrade must create the new action and rollback preserve A.
+  writeHostFile(paths.receiptPath,JSON.stringify(a.spec)+'\n');
   await installNativeService(paths,{...options,daemonPath:a.daemonPath,startupStatus:()=>readRuntimeStatus(config)});
   const first=recordPid();assert.equal(first.version,'A');assert.ok(alive(first.pid));
   phase='autostart-off-while-running';
