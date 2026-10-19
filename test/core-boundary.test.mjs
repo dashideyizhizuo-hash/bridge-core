@@ -42,6 +42,14 @@ test('public core gate accepts deployable core and rejects private payment artif
   add('migrations/0030_waffo_payments.sql','CREATE TABLE private_payment(id TEXT);');
   assert.equal(check().status,1);git('rm','-f','migrations/0030_waffo_payments.sql');
   assert.equal(check().status,0);
+  for(const path of ['ops/waffo-sandbox-worker.mjs','config/waffo.test.json',
+    'bin/check-waffo.mjs','bin/test-waffo-worker.mjs']) {
+    add(path,'synthetic provider fixture');const result=check();
+    assert.equal(result.status,1,path);assert.match(result.stdout,/private payment provider artifact/);
+    git('rm','-f',path);assert.equal(check().status,0,path);
+  }
+  add('docs/provider-guide.md','Waffo is discussed here without shipping its implementation.');
+  assert.equal(check().status,0,'ordinary documentation references are not implementation artifacts');
   // A maintained authentication library is not inherently commercial code.
   add('package.json','{"dependencies":{"better-auth":"1.7.7"}}');
   assert.equal(check().status,0);

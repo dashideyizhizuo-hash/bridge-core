@@ -7,6 +7,9 @@ const tracked=spawnSync('git',['ls-files','-z'],{encoding:'utf8',windowsHide:tru
 if(tracked.status!==0) throw new Error('Core boundary check requires a Git checkout');
 const files=tracked.stdout.split('\0').filter(Boolean),violations=[];
 for(const file of files) {
+  if(/(?:^|\/)(?:(?:check|test)-)?waffo(?:[-_.]|$)/i.test(file)) {
+    violations.push({file,reason:'private payment provider artifact'});continue;
+  }
   if(/(?:^|\/)(?:test-)?billing(?:[-_.\/]|$)/i.test(file) || /^migrations\/\d+_(?:billing|waffo)/i.test(file)) {
     violations.push({file,reason:'private billing implementation or artifact'});continue;
   }
