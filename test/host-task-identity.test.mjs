@@ -5,7 +5,7 @@ import {makeTestDirectory as mkdtempSync} from './helpers/canonical-temp.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { hostPowerShell } from '../src/host-platform.mjs';
 import { taskAccountSidPowerShell } from '../src/host-native-service.mjs';
@@ -52,6 +52,9 @@ ${taskAccountSidPowerShell}
 test('Windows action retries failed children with bounded backoff and a lifetime-owned Job',()=>{
   const action=windowsAction({nodePath:'C:\\Node\\node.exe',daemonPath:'C:\\user $HOME & 中文\\daemon.mjs',configDir:'C:\\user $HOME & 中文'});
   const source=Buffer.from(action.arguments.split(' ').at(-1),'base64').toString('utf16le');
+  assert.equal(createHash('sha256').update(JSON.stringify(action)).digest('hex'),
+    'c63e2d13843f197bd72edbc8948f5a22e60121f84d2dd2b9c07dbf1152d26438',
+    'pre-detachment receipts must retain their exact action and ownership marker');
   assert.equal(source.includes('C:\\Node'),false);assert.equal(source.includes('中文'),false);
   assert.ok(source.includes('$s.UseShellExecute=$false'));
   assert.ok(source.includes('$child.WaitForExit()'));
@@ -63,13 +66,18 @@ test('Windows action retries failed children with bounded backoff and a lifetime
   assert.ok(source.includes('AssignProcessToJobObject(job,GetCurrentProcess())'));
   assert.ok(source.indexOf('[BridgeHostJob]::Attach()')<source.indexOf('[Diagnostics.Process]::Start($s)'));
 });
+
+test('unrecognized Windows console modes fail closed',()=>{
+  const spec={nodePath:'C:\\Node\\node.exe',daemonPath:'C:\\Host\\daemon.mjs',configDir:'C:\\Host'};
+  assert.throws(()=>windowsAction({...spec,detachedConsole:false}),error=>error.code==='HOST_SERVICE_INVALID');
+});
 test('real Windows action retries a failed child, then honors its clean exit',
   {skip:process.platform!=='win32'},t=>{
   const root=realpathSync(mkdtempSync(join(tmpdir(),'bridge-action-retry-')));
   t.after(()=>rmSync(root,{recursive:true,force:true}));
   const daemonPath=join(root,'child $HOME & 中文.mjs'),count=join(root,'attempts');
-  writeFileSync(daemonPath,`import {existsSync,readFileSync,writeFileSync} from 'node:fs'; const file=${JSON.stringify(count)}; const n=existsSync(file)?Number(readFileSync(file,'utf8'))+1:1; writeFileSync(file,String(n)); process.exit(n===1?7:0);`);
-  const action=windowsAction({nodePath:process.execPath,daemonPath,configDir:root});
+  writeFileSync(daemonPath,`import {existsSync,readFileSync,writeFileSync} from 'node:fs'; const file=${JSON.stringify(count)}; const n=existsSync(file)?Number(readFileSync(file,'utf8'))+1:1; writeFileSync(file,String(n)); process.stdout.write('x'.repeat(131072),()=>process.stderr.write('中文诊断'.repeat(65536),()=>process.exit(n===1?7:0)));`);
+  const action=windowsAction({nodePath:process.execPath,daemonPath,configDir:root,detachedConsole:true});
   const started=Date.now();
   const result=spawnSync(action.path,action.arguments.split(' '),{env:testEnvironment(),encoding:'utf8',timeout:20_000,maxBuffer:8192,windowsHide:true,stdio:['pipe','pipe','pipe'],input:''});
   assert.equal(result.error,undefined,result.error?.message);
@@ -82,7 +90,7 @@ test('force-killing a real Windows launcher terminates its child and grandchild 
   const root=realpathSync(mkdtempSync(join(tmpdir(),'bridge-action-job-')));
   const daemonPath=join(root,'tree.mjs'),marker=join(root,'pids.json');
   writeFileSync(daemonPath,`import {spawn} from 'node:child_process';import {writeFileSync} from 'node:fs';const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});writeFileSync(${JSON.stringify(marker)},JSON.stringify({parent:process.pid,child:child.pid}));setInterval(()=>{},1000);`);
-  const action=windowsAction({nodePath:process.execPath,daemonPath,configDir:root});
+  const action=windowsAction({nodePath:process.execPath,daemonPath,configDir:root,detachedConsole:true});
   const launcher=spawn(action.path,action.arguments.split(' '),{env:testEnvironment(),windowsHide:true,stdio:['pipe','pipe','pipe']});
   let stderr='';launcher.stderr.on('data',chunk=>{stderr+=chunk.toString().slice(0,8192-stderr.length);});
   launcher.stdout.resume();launcher.stdin.end();

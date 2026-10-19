@@ -64,6 +64,24 @@ async function heartbeat(previousPid,{timeoutMs=15_000}={}) {
   throw new Error('Native task did not produce its scoped heartbeat');
 }
 function alive(pid) {try{process.kill(pid,0);return true;}catch{return false;}}
+function assertDetachedSupervisor(parent) {
+  const result=hostPowerShell(`
+Add-Type -TypeDefinition @'
+using System;using System.Runtime.InteropServices;
+public static class ConsoleProbe {
+  [DllImport("kernel32.dll",SetLastError=true)]public static extern bool AttachConsole(uint processId);
+  [DllImport("kernel32.dll",SetLastError=true)]public static extern bool FreeConsole();
+}
+'@
+[void][ConsoleProbe]::FreeConsole()
+$attached=[ConsoleProbe]::AttachConsole([uint32]$d.parent)
+$attachError=if($attached){0}else{[Runtime.InteropServices.Marshal]::GetLastWin32Error()}
+if($attached){[void][ConsoleProbe]::FreeConsole()}
+@{attached=$attached;attachError=$attachError}|ConvertTo-Json -Compress
+`,{parent});
+  assert.equal(result.attached,false,'The background supervisor must not remain attached to a terminal console');
+  assert.equal(result.attachError,6,'The owned parent must have no console, not an inaccessible console');
+}
 async function stopped(pids) {
   // macOS's parent is launchd itself, not an owned wrapper; never wait/kill it.
   const ownedPids=[pids.pid,...(process.platform==='win32' ? [pids.parent] : [])].filter(Number.isInteger);
@@ -77,6 +95,7 @@ try {
   installAttempted=true;
   const started=await installNativeService(paths,{daemonPath});owned=true;
   assert.equal(started.active,true);const first=await heartbeat();
+  if(process.platform==='win32')assertDetachedSupervisor(first.parent);
   await installNativeService(paths,{daemonPath});assert.equal((await heartbeat()).pid,first.pid);
   taskDiagnostics('before-crash',first);
   phase='crash-restart';
@@ -93,6 +112,7 @@ try {
   const evidence={platform:process.platform,node:process.version,adapter:paths.adapter,
     actualNativeTask:true,currentUserIdentity:true,metacharacterAndUnicodePaths:true,
     idempotentStart:true,crashRestart:true,stopTerminatesChild:true,resumeRetainsIdentity:true,
+    ...(process.platform==='win32'?{supervisorDetachedFromConsole:true}:{}),
     productionLogin:false,productionHostModified:false,logoffOrRebootTest:false,
     windowsPrivilegeNote:process.platform==='win32' ? 'Task configured InteractiveToken/LUA, not LocalSystem; hosted CI may itself be administrator' : undefined};
   const repository=resolve(dirname(fileURLToPath(import.meta.url)),'..');
@@ -108,7 +128,7 @@ try {
       const spec=JSON.parse(readFileSync(paths.receiptPath,'utf8'));
       const current=hostPowerShell(`$sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value;@{sid=$sid}|ConvertTo-Json -Compress`,{});
       const expected={schemaVersion:1,adapter:paths.adapter,name:paths.name,configDir:paths.configDir,
-        nodePath:process.execPath,daemonPath,sid:current.sid};
+        nodePath:process.execPath,daemonPath,sid:current.sid,detachedConsole:true};
       expected.action=windowsAction(expected);
       expected.marker='Bridge Host '+createHash('sha256').update(JSON.stringify(expected)).digest('hex');
       assert.deepEqual(spec,expected,'Fixture receipt must match the harness-owned paths, identity and action before task cleanup');
