@@ -2,11 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { unzipSync } from 'fflate';
 import { assertBridge, BridgeError } from './errors.mjs';
 import { validateTaskBinding } from './task-runtime-binding.mjs';
+import { readBoundedBody } from './cloudflare/request-body.mjs';
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/;
 const REQUEST_PREFIX = 'bridge/requests/';
 const PUBLISH_PREFIX = 'bridge/publish/';
 const RUN_ID_PREFIX = 'gh1';
+const MAX_ARTIFACT_ARCHIVE_BYTES = 4 * 1024 * 1024;
+const MAX_ARTIFACT_JSON_BYTES = 1024 * 1024;
 
 function repositoryName(value) {
   assertBridge(
@@ -76,10 +79,35 @@ function terminalStatus(run) {
   return 'FAILED';
 }
 
-function findArchiveJson(entries, filename) {
-  const names = Object.keys(entries).filter(name => name === filename || name.endsWith(`/${filename}`));
-  assertBridge(names.length === 1, 'GITHUB_EVIDENCE_INVALID', `artifact must contain exactly one ${filename}`);
-  return parseJson(entries[names[0]], filename);
+function findArchiveJson(archive, filename) {
+  assertBridge(archive instanceof Uint8Array && archive.byteLength <= MAX_ARTIFACT_ARCHIVE_BYTES,
+    'GITHUB_EVIDENCE_INVALID', 'GitHub artifact archive exceeds limit');
+  const matches=[];
+  // Inspect every central-directory entry without inflating any payload first.
+  // Duplicate paths must not disappear into fflate's filename-keyed result map.
+  let entries;
+  try {
+    unzipSync(archive,{filter:file=>{
+      if(file.name!==filename && !file.name.endsWith(`/${filename}`))return false;
+      matches.push(file);
+      assertBridge(matches.length===1,'GITHUB_EVIDENCE_INVALID',`artifact must contain exactly one ${filename}`);
+      assertBridge(Number.isSafeInteger(file.originalSize) && file.originalSize>=0 && file.originalSize<=MAX_ARTIFACT_JSON_BYTES &&
+        Number.isSafeInteger(file.size) && file.size>=0 && file.size<=MAX_ARTIFACT_ARCHIVE_BYTES && [0,8].includes(file.compression),
+      'GITHUB_EVIDENCE_INVALID',`${filename} exceeds the artifact JSON limit`);
+      return false;
+    }});
+    assertBridge(matches.length===1,'GITHUB_EVIDENCE_INVALID',`artifact must contain exactly one ${filename}`);
+    // Unrelated entries are never expanded, even if their declared output is
+    // enormous or their compressed stream is corrupt.
+    entries=unzipSync(archive,{filter:file=>file.name===matches[0].name});
+  } catch(error) {
+    if(error?.code==='GITHUB_EVIDENCE_INVALID')throw error;
+    throw new BridgeError('GITHUB_EVIDENCE_INVALID','GitHub artifact is not a valid ZIP archive',{cause:error.message});
+  }
+  const bytes=entries[matches[0].name];
+  assertBridge(bytes?.byteLength===matches[0].originalSize && bytes.byteLength<=MAX_ARTIFACT_JSON_BYTES,
+    'GITHUB_EVIDENCE_INVALID',`${filename} has an invalid artifact JSON size`);
+  return parseJson(bytes,filename);
 }
 
 function verifyResultBinding({ parsed, record, kind }) {
@@ -165,7 +193,8 @@ export class GitHubRestClient {
       redirect: 'follow'
     });
     if (!response.ok) throw new BridgeError('GITHUB_API_ERROR', `GitHub artifact download failed with HTTP ${response.status}`, { status: response.status });
-    return new Uint8Array(await response.arrayBuffer());
+    return readBoundedBody(response,{maxBytes:MAX_ARTIFACT_ARCHIVE_BYTES,code:'GITHUB_EVIDENCE_INVALID',
+      message:'GitHub artifact archive exceeds limit'});
   }
 }
 
@@ -391,10 +420,7 @@ export class GitHubTransport {
     const artifact = artifacts.find(item => item?.name === artifactName && item?.expired !== true);
     assertBridge(artifact && Number.isInteger(artifact.id), 'GITHUB_EVIDENCE_INVALID', `required artifact not found: ${artifactName}`);
     const archive = await this.github.download(`/repos/${repository}/actions/artifacts/${artifact.id}/zip`);
-    let entries;
-    try { entries = unzipSync(archive); }
-    catch (error) { throw new BridgeError('GITHUB_EVIDENCE_INVALID', 'GitHub artifact is not a valid ZIP archive', { cause: error.message }); }
-    return findArchiveJson(entries, filename);
+    return findArchiveJson(archive, filename);
   }
 
   async getResult(runId) {
