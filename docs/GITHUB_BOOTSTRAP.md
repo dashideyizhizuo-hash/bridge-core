@@ -4,16 +4,32 @@ Ordinary host commands should use Direct Exec and require no repository onboardi
 
 Use GitHub engineering bootstrap only when an Agent needs repository source mutation, trusted verification and/or verified publication.
 
-## One command
+## Obtain the public CLI
 
-From a Bridge checkout:
+Host npm 0.4.2 does not include `bootstrap-project`; use the public core source
+instead. Select an accepted immutable runtime SHA and a clean checkout of
+`https://github.com/dashideyizhizuo-hash/bridge-core`. No private operated-service
+source or published npm core package is required. Node.js 22+ is sufficient for
+this bootstrap CLI; its imports use Node built-in modules.
+
+The runtime repository and SHA must identify the same accessible source. A SHA
+from an unrelated/private checkout does not become a valid public action pin by
+changing the repository name. Check the source and CI for a newly selected pin.
+
+## Generate the repository files
+
+From the selected Bridge checkout, set `BRIDGE_RUNTIME_SHA`, `RUNNER_CLASS` and
+`RUNNER_SERVICE_USER` from the approved runtime/host inventory. Substitute the
+actual target path and real verifier argv:
 
 ~~~bash
 node bin/bridge-runner.mjs bootstrap-project \
-  --bridge-repository YOUR-OWNER/YOUR-RUNTIME \
+  --bridge-repository dashideyizhizuo-hash/bridge-core \
+  --bridge-sha "$BRIDGE_RUNTIME_SHA" \
   --repo /path/to/target-repository \
   --verify-argv '["npm","test"]' \
-  --host-policy /etc/bridge/host.json
+  --runner-class "$RUNNER_CLASS" \
+  --service-user "$RUNNER_SERVICE_USER"
 ~~~
 
 Defaults:
@@ -21,7 +37,7 @@ Defaults:
 - repository: derived from the target repository's GitHub origin;
 - Bridge action pin: exact HEAD of the Bridge checkout running the command;
 - runner class: bridge;
-- service user: current OS user;
+- service user: `bridge-runner`, regardless of the command caller; specify the actual GitHub Actions runner service user explicitly;
 - edit branches: agent/** and codex/**;
 - edit paths: **;
 - publication: enabled, but still subject to repository grant, trusted policy, VERIFIED evidence and stale-target checks.
@@ -46,15 +62,40 @@ The command generates:
 .github/workflows/bridge-publish.yml
 ~~~
 
-The gateway runner label is rewritten to the selected runner class.
+The gateway runner label is rewritten to the selected runner class. The shipped
+template still requires `[self-hosted, linux, x64, <runner-class>]`, Bash and
+`/etc/bridge/host.json`; general Windows/Linux Host support does not make this
+engineering template Windows/ARM compatible.
 
 Every example/bridge@... action reference is pinned to the exact selected Bridge SHA.
 
-The trusted verify capability executes exactly the argv supplied through --verify-argv; it is not interpreted as a shell string.
+The trusted verify capability executes exactly the argv supplied through
+`--verify-argv`; it is not interpreted as a shell string. `npm test` above is valid
+only when it is the project's actual complete gate. If a fresh workspace needs
+dependency setup/tests/builds, use a trusted repository-owned wrapper and supply
+its exact argv. Bootstrap does not create that wrapper or install dependencies.
+
+Review the generated paths, branches and limits before committing. The default
+edit patterns permit `agent/**` and `codex/**`, not `main`. Create an approved
+existing remote working branch before edit acceptance; target resolution requires
+the ref to exist. Keep the trusted policy and workflow on the default branch and
+bind verification/publication to the exact policy/base/candidate identities.
 
 ## Host policy merge
 
 When --host-policy is provided, bootstrap merges only the target repository entry into the existing host policy.
+
+The option does not rewrite the workflow's `/etc/bridge/host.json` input. Passing
+an ordinary Direct Host's user configuration path does not make Actions use it.
+The default generation command above leaves active host authority unchanged.
+Stage/review any host-policy merge with the host administrator before installation.
+
+The policy and its parent directory must remain administrator-controlled and
+unwritable by target code while the actual runner account can read them. Atomic
+bootstrap writes use a private file mode; when installing an administrator-owned
+policy, explicitly preserve/restore its intended reader group/ACL. A successful
+JSON validation is not proof of OS isolation. Do not give target code root/sudo,
+an unrestricted Docker socket or long-lived publication credentials.
 
 It preserves unrelated repositories, Direct Exec configuration and existing logical resources.
 
@@ -69,7 +110,7 @@ If an existing repository entry already binds another runner class or service us
 Before the first host-policy mutation, it creates:
 
 ~~~text
-/etc/bridge/host.json.bridge-bootstrap.bak
+<host-policy-path>.bridge-bootstrap.bak
 ~~~
 
 if that backup does not already exist.
@@ -88,14 +129,21 @@ Bootstrap deliberately does not claim success for external authority it cannot c
 
 After generation, the returned next checklist still requires applicable external facts:
 
-1. commit generated repository files to the trusted/default branch;
-2. ensure the official Bridge GitHub App installation includes the repository;
-3. ensure Bridge's principal repository grant allows read/run/publish;
-4. ensure a self-hosted GitHub runner with the declared class is online;
-5. verify private cross-repository action access while Bridge itself remains private;
-6. run bridge.discover(repository) and an actual acceptance flow.
+1. obtain permission for the specific target repository and review/commit the generated files to its trusted/default branch;
+2. ensure the configured GitHub App installation includes the repository and the user has the required rights;
+3. authorize/select the repository through the deployment's supported flow; read-only users or App installations must remain read-only;
+4. ensure an independent GitHub Actions self-hosted runner is online under the actual approved account with the required Linux/x64/class labels;
+5. validate the administrator-controlled host policy and resource isolation as that runner account;
+6. check the target repository's Actions/allowed-action settings for the selected public runtime pin; public core does not need private cross-repository action access;
+7. run `bridge.discover(repository)` and a separately authorized real acceptance flow: read-only execution, then VERIFIED edit and PUBLISHED receipt only when requested and permitted.
 
 These are real authority boundaries, not boilerplate that should be hidden.
+
+A paired Bridge Host is not a GitHub Actions runner. Its pause/autostart controls
+do not stop separate Actions jobs; already dispatched work does not roll back on
+grant revocation. Bootstrap changes no OAuth grant, account ownership, repository
+visibility, license, fee rule or runner registration. Keep source preparation,
+external authorization and actual execution acceptance distinct.
 
 ## Recommended product workflow
 
