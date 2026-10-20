@@ -88,6 +88,82 @@ function artifactZip(filename,value){
   return zipSync({[filename]:strToU8(JSON.stringify(value))});
 }
 
+function resultArtifactTransport(archive){
+  const request=capabilityRequest(),branch=`bridge/requests/${request.requestId}`;
+  return transportFor(new FakeGitHub(call=>{
+    if(call.method==='GET'&&call.path.includes('/contents/'))return encodedJson(request);
+    if(call.method==='GET'&&call.path.includes('/workflows/'))return {workflow_runs:[{id:42,status:'completed',conclusion:'success',head_sha:CONTROL,head_branch:branch}]};
+    if(call.method==='GET'&&call.path.endsWith('/artifacts?per_page=100'))return {artifacts:[{id:7,name:'bridge-result-42',expired:false}]};
+    if(call.method==='DOWNLOAD')return archive;
+    throw new Error(`unexpected ${call.method} ${call.path}`);
+  }));
+}
+
+function resultEvidence(){
+  return {schemaVersion:1,requestId:capabilityRequest().requestId,status:'SUCCEEDED',repository:REPO,targetSha:TARGET,policySha:POLICY};
+}
+
+test('result artifact rejects a small compressed archive whose expected JSON exceeds 1 MiB',async()=>{
+  const archive=artifactZip('bridge-result.json',{...resultEvidence(),padding:'x'.repeat(1048576)});
+  assert.ok(archive.byteLength<4096,'the compressed-size limit alone cannot stop this payload');
+  await assert.rejects(resultArtifactTransport(archive).getResult(`gh1:${REPO}:${capabilityRequest().requestId}:${CONTROL}`),{code:'GITHUB_EVIDENCE_INVALID'});
+});
+
+test('result artifact rejects duplicate identical expected paths before map keys can overwrite',async()=>{
+  const content=strToU8(JSON.stringify(resultEvidence())),archive=zipSync({'a/bridge-result.json':content,'b/bridge-result.json':content});
+  // Rename both the second local header and central-directory entry. A map
+  // keyed by filename otherwise silently replaces the first matching result.
+  const marker=strToU8('b/bridge-result.json');let changed=0;
+  for(let i=0;i<=archive.length-marker.length;i++)if(marker.every((byte,j)=>archive[i+j]===byte)){archive[i]=97;changed++;}
+  assert.equal(changed,2);
+  await assert.rejects(resultArtifactTransport(archive).getResult(`gh1:${REPO}:${capabilityRequest().requestId}:${CONTROL}`),{code:'GITHUB_EVIDENCE_INVALID'});
+});
+
+function centralEntry(archive,name){
+  const view=new DataView(archive.buffer,archive.byteOffset,archive.byteLength);
+  for(let offset=0;offset+46<=archive.length;offset++)if(view.getUint32(offset,true)===0x02014b50){
+    const length=view.getUint16(offset+28,true);
+    if(new TextDecoder().decode(archive.subarray(offset+46,offset+46+length))===name)return {view,offset,local:view.getUint32(offset+42,true)};
+  }
+  throw Error('Missing test ZIP entry '+name);
+}
+
+test('result artifact rejects a forged huge expected size before allocating its declared output',async()=>{
+  const archive=artifactZip('bridge-result.json',resultEvidence()),entry=centralEntry(archive,'bridge-result.json');
+  entry.view.setUint32(entry.offset+24,0x7fffffff,true);
+  entry.view.setUint32(entry.local+22,0x7fffffff,true);
+  await assert.rejects(resultArtifactTransport(archive).getResult(`gh1:${REPO}:${capabilityRequest().requestId}:${CONTROL}`),{code:'GITHUB_EVIDENCE_INVALID'});
+});
+
+test('result artifact ignores unrelated corrupt entries with enormous declared output',async()=>{
+  const archive=zipSync({'nested/bridge-result.json':strToU8(JSON.stringify(resultEvidence())),'ignored.log':strToU8('ignored'.repeat(1000))}),entry=centralEntry(archive,'ignored.log');
+  entry.view.setUint32(entry.offset+24,0x7fffffff,true);
+  const payload=entry.local+30+entry.view.getUint16(entry.local+26,true)+entry.view.getUint16(entry.local+28,true);
+  archive[payload]=6; // Reserved DEFLATE block type; inflating this entry fails.
+  const result=await resultArtifactTransport(archive).getResult(`gh1:${REPO}:${capabilityRequest().requestId}:${CONTROL}`);
+  assert.equal(result.status,'SUCCEEDED');
+});
+
+test('result artifact accepts exactly 1 MiB of expected JSON and rejects oversized compressed archives',async()=>{
+  const result={...resultEvidence(),padding:''},base=strToU8(JSON.stringify(result)).length;
+  result.padding='x'.repeat(1048576-base);assert.equal(strToU8(JSON.stringify(result)).length,1048576);
+  const transport=resultArtifactTransport(artifactZip('bridge-result.json',result));
+  assert.equal((await transport.getResult(`gh1:${REPO}:${capabilityRequest().requestId}:${CONTROL}`)).status,'SUCCEEDED');
+  await assert.rejects(resultArtifactTransport(new Uint8Array(4*1048576+1)).getResult(`gh1:${REPO}:${capabilityRequest().requestId}:${CONTROL}`),{code:'GITHUB_EVIDENCE_INVALID'});
+});
+
+test('artifact download rejects oversized declared and chunked bodies while cancelling the stream',async()=>{
+  for(const declared of [true,false]){
+    let cancelled=false,pulls=0;
+    const response=new Response(new ReadableStream({pull(controller){pulls++;controller.enqueue(new Uint8Array(declared?1:2*1048576));},cancel(){cancelled=true;}}),
+      {headers:declared?{'content-length':String(4*1048576+1)}:{}});
+    response.arrayBuffer=()=>{throw Error('Artifact must be consumed with a streaming bound');};
+    const client=new GitHubRestClient({token:'fixture',fetchImpl:async()=>response});
+    await assert.rejects(client.download('/repos/example/project/actions/artifacts/7/zip'),{code:'GITHUB_EVIDENCE_INVALID'});
+    assert.equal(cancelled,true);assert.ok(pulls<=4,'oversized chunked download must stop promptly');
+  }
+});
+
 class FakeGitHub {
   constructor(handler){
     this.handler=handler;
