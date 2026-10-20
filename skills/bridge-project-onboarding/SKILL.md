@@ -27,17 +27,49 @@ Direct Exec intentionally requires no target repository, `.bridge/project.json`,
 
 Use the remainder of this Skill when the requested operation actually needs Git engineering semantics.
 
-For a new repository, prefer the repository-owned bootstrap instead of manually copying policy/workflow templates:
+For a new repository, prefer the repository-owned bootstrap instead of manually
+copying policy/workflow templates. Set `BRIDGE_RUNTIME_SHA`, `RUNNER_CLASS` and
+`RUNNER_SERVICE_USER` from the verified runtime/host inventory before running:
 
 ```bash
 node bin/bridge-runner.mjs bootstrap-project \
   --bridge-repository YOUR-OWNER/YOUR-RUNTIME \
+  --bridge-sha "$BRIDGE_RUNTIME_SHA" \
   --repo /path/to/repository \
   --verify-argv '["<real>","<project>","<quality-gate>"]' \
-  --host-policy /etc/bridge/host.json
+  --runner-class "$RUNNER_CLASS" \
+  --service-user "$RUNNER_SERVICE_USER"
 ```
 
-Bootstrap generates the project policy and pinned gateway/publish workflows, and safely merges the repository host-policy entry when requested. It does not fabricate GitHub App grants or runner registration; validate those external authority boundaries afterward.
+Bootstrap generates the project policy and pinned gateway/publish workflows.
+The actual default service user is `bridge-runner`, not the caller: pass the
+GitHub Actions runner's actual OS account explicitly. Current templates select
+`[self-hosted, linux, x64, <runner-class>]` and read `/etc/bridge/host.json`.
+Optional `--host-policy` merges that local file but does not rewrite the workflow
+path; stage/admin-review that change before replacing a protected active policy.
+The merge writes a private file mode, so verify intended runner read access after
+installation. The administrator-owned policy and parent directory must remain
+unwritable by target code. Existing unrelated entries/resources must be preserved.
+
+Host npm 0.4.2 does not include this bootstrap CLI. Obtain it from the public
+`dashideyizhizuo-hash/bridge-core` source at an accepted exact SHA; no private
+operated-service source is needed. The runtime repository and SHA must refer to
+the same accessible source. Node.js 22+ suffices for the bootstrap path. Public
+source availability does not authorize changing the runtime repository as an
+acceptance target.
+
+Bootstrap neither creates a real quality-gate script nor installs project
+dependencies. Supply the actual trusted verifier argv; prepare a repository-owned
+wrapper if a fresh workspace needs dependency installation/tests/builds. Review
+and merge the three generated files into the default branch, then create an
+approved existing remote `agent/**` or `codex/**` target before edit acceptance;
+bootstrap's default edit branch patterns exclude `main`.
+
+GitHub App installation, the service's repository grant/selection and runner
+registration are separate external boundaries. A paired Direct Host is not a
+GitHub Actions runner. Direct Host pause does not stop already dispatched Actions.
+Bootstrap grants none of those external rights and changes no visibility,
+licensing, account ownership or fee rules.
 
 The intended GitHub-engineering end state is:
 
@@ -107,7 +139,9 @@ A project policy must not reveal physical host paths.
 
 # 2. Default repository grant semantics
 
-For the normal autonomous-development use case, repository onboarding should create or refresh:
+For an explicitly authorized full autonomous-development delivery flow, request
+the following effective rights only when both the user's GitHub rights and App
+installation profile permit them:
 
 ```text
 can_read    = 1
@@ -137,7 +171,11 @@ is one complete development-delivery cycle.
 - stale-target / lease checks;
 - GitHub write authority in the isolated publish workflow.
 
-If production onboarding still creates `can_publish=0`, treat that as deployment drift until the default-publish code/migration is deployed.
+`can_publish=0` is not automatically deployment drift: a read-only user, restricted
+App installation or intentionally limited grant must remain restricted. Diagnose
+drift only against the independently verified intended effective authority. Use
+the deployment's supported authorization flow; do not edit identity/grant records
+to manufacture permission or change account ownership.
 
 Do not globally remove repository authorization.
 
@@ -647,7 +685,8 @@ can_run
 can_publish
 ```
 
-For normal repository onboarding, target state is:
+For an authorized full delivery flow whose user/App/project/host layers allow it,
+the desired effective state is:
 
 ```text
 1 / 1 / 1
@@ -664,6 +703,8 @@ GitHub App installation
 All layers must agree.
 
 Do not treat GitHub App `contents:write` as equivalent to Bridge `can_publish`.
+Read/run/publish also require the corresponding maintained App permission profile
+and the user's current repository rights; repository selection cannot elevate them.
 
 Do not remove repository authorization checks.
 
@@ -989,10 +1030,11 @@ project policy editing.publish
 
 Do not assume they are the same layer.
 
-For normal onboarding after the default-publish change:
+For a full-delivery onboarding expected to allow publication, verify rather than
+assume:
 
 ```text
-can_publish should already be 1
+effective can_publish = 1 only if user, App and Bridge grant all allow it
 ```
 
 ---
