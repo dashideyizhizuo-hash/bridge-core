@@ -351,7 +351,7 @@ export async function activateChat(options,{
 function preflightPrompt(nonce,repository) {
   return [
     'Complete this task in the current ordinary Chat mode. Do not request or attempt a switch to Work or Codex mode.',
-    `Before starting repository work, call bridge.discover for ${repository}. If that call succeeds for the same repository, reply with exactly one plain-text line: BRIDGEREADY|${nonce}. If the action is absent or fails, reply exactly: BRIDGEUNAVAILABLE|${nonce}. Then stop.`
+    `Before starting repository work, call bridge.get_repository_configuration for ${repository}. If that call succeeds for the same repository, reply with exactly one plain-text line: BRIDGEREADY|${nonce}. If the action is absent or fails, reply exactly: BRIDGEUNAVAILABLE|${nonce}. Then stop.`
   ].join('\n');
 }
 

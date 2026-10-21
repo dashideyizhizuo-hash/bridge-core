@@ -15,28 +15,38 @@ Choose the lightest execution plane that satisfies the task.
 
 Use Direct for installed CLIs, scripts, local SQLite/data inspection, OpenCLI/browser tooling, conversion/media work and other non-Git operations.
 
-If the user has not connected a Direct host yet:
+Use the owner's self-hosted deployment guide. Host 0.5.0 is the client for the
+explicit tool interface; build its local archive and select the owner's actual
+HTTPS endpoint. A prepared source version does not prove registry availability
+or that the deployed server is ready. Preserve the configured non-live default
+until the owner explicitly selects a real service.
 
-1. Call `bridge.run(mode="connect")` through the already-authenticated Bridge connector.
-2. Return the short-lived Bridge endpoint + pairing capability to the user's host workflow.
-3. On the host, use `bridge-host connect`; prefer a temporary pairing-token file or environment variable rather than a long-lived command-line token.
-4. Then run `bridge-host doctor` and `bridge-host start`.
-5. Never ask the user for Cloudflare credentials, Wrangler login, `BRIDGE_DIRECT_ADMIN_TOKEN`, a PAT or an SSH key for normal Direct host enrollment.
-6. Never invent a host ID: self-service host identity is allocated server-side.
-
-For an already-connected host, use repository-free `bridge.discover()` to inspect host state. Use `bridge.run(mode="host", host=..., enabled=false)` for the owner's normal kill switch; operator admin endpoints are not customer tooling.
-
-1. Call `bridge.discover()` without a repository to see Direct hosts/assets.
-2. With one enabled host, prefer the minimal call:
+1. Call `bridge.list_hosts()` and select a returned owned `hostId`.
+2. If none is connected, run the official Host setup on the user's computer.
+   Its browser OAuth flow calls `bridge.create_host_pairing` and claims that
+   short-lived capability locally. Keep pairing material inside that flow and
+   private local storage. Existing correct identities are reused, not recreated.
+3. For an authorized command, use:
    ```text
-   bridge.run(mode="direct", argv=[...])
+   bridge.run_host_command(hostId=<returned hostId>, argv=[...])
    ```
-3. Use only argv arrays and relative cwd; never invent host absolute paths.
-4. Poll with `bridge.get_run` and retrieve bounded evidence with `bridge.get_result`.
-5. For a ChatGPT/Codex file, use the MCP-native file parameter on `bridge.run(mode="asset", file=...)`. Bridge imports the authorized file directly into its private R2 store and returns a READY temporary asset ID and `expiresAt` (24h by default); do not perform a second caller-side PUT. Use the low-level ticket + PUT flow only for programmable compatibility clients that explicitly control raw HTTP.
+4. Use argv arrays and relative cwd. The response waits up to 10 seconds by
+   default; keep the returned `runId` when work is pending or a read is interrupted.
+   Query `bridge.get_run` / `bridge.get_result` before considering another submission.
+5. Import an actual attachment with `bridge.import_file(file=...)`. The native
+   four-field file input produces a READY temporary asset and actual expiry.
+   This completes import; it does not require a second caller-side PUT.
 6. Bind READY asset IDs to Direct Runs with `assets=[...]` and exact `{asset:N}` argv placeholders. For host-to-caller files, declare bounded `exports=[{fileName,mimeType,maxBytes,required}]` and pass only exact `{export:N}` placeholders; never supply or infer an arbitrary host output path.
 7. `bridge.get_result` may return file `resource_link` content for imported/exported private R2 objects. Treat the resource URI/asset ID as the reusable file identity; do not expose R2 keys or invent public URLs.
-8. Treat `BRIDGE_REQUEST_ID` as the operation idempotency key when invoking side-effecting tools.
+8. Use `bridge.pause_host(hostId)` / `bridge.resume_host(hostId)` only for the
+   owner's requested Direct Host execution permission change. Pause does not
+   undo completed work or stop a separate Actions runner. `bridge.delete_file`
+   deletes a specifically approved owned permanent asset, not a local Host file.
+
+Programmable byte-upload clients can use `bridge.create_file_upload` with exact
+filename, MIME type, size and SHA-256, then complete its protected upload flow.
+A ticket alone is not a READY file. Keep returned upload credentials private.
+Ordinary enrollment needs no Cloudflare admin secret, PAT or SSH key.
 
 Do not demand repository onboarding merely because a CLI or data file belongs to a project.
 
@@ -45,10 +55,22 @@ Do not demand repository onboarding merely because a CLI or data file belongs to
 Use GitHub-backed Bridge only when the task requires source mutation, exact commit identity, trusted verification, VERIFIED candidate evidence, or publication.
 
 1. Identify the exact target repository.
-2. Call `bridge.discover(repository)`.
-3. Resolve target ref/SHA and trusted policy.
-4. Prefer one bounded batch Run.
-5. Use preset/exec/edit according to trusted policy.
+2. Use `bridge.repository_tools_status` when repository tools are unavailable;
+   it reports missing policy and the bounded extra-tool catalog without blocking
+   ordinary Host operations. Call `bridge.get_repository_configuration(repository)` and retain its exact
+   trusted policy SHA. Resolve the intended existing target ref/SHA.
+3. Execute one or more bounded argv commands with
+   `bridge.execute_repository_commands`; every command has an explicit ID.
+   Include the returned policy identity as `expectedPolicySha`, then retain
+   the actual Run identity returned for that submission. If its first response
+   is lost, inspect execution and side effects before deciding to submit again.
+4. Use `bridge.verify_repository` for the fixed trusted `mcp.verification`
+   recipe, or `bridge.edit_and_verify_repository` for bounded edits followed by
+   that same mandatory recipe. Missing recipe or changed policy is a setup error.
+   The caller does not supply capabilities, verification lists or mixed steps.
+5. If a trusted preset is separately exposed in the current tool list, use its
+   actual server-generated name and closed input schema. Refresh tool discovery
+   after an approved catalog change; tool availability never grants authority.
 6. Retrieve terminal evidence through `bridge.get_run/get_result`.
 7. Publish only a VERIFIED candidate through `bridge.publish(runId)`.
 
@@ -76,13 +98,16 @@ Direct Exec 的 stdout/stderr 契约是 UTF-8。`whoami /user`、`whoami /all`
 
 ## Generic exec
 
-Use batch `exec` when:
+Use `bridge.execute_repository_commands` when:
 
 - project and host policy expose generic exec authority;
 - the argv/cwd/resources fit the discovered limits;
 - the task benefits from a bounded command rather than a stable named preset.
 
-Prefer a named preset when an operation is a stable privileged/project-specific action.
+Use an upfront, separately exposed trusted preset for a stable project check.
+Its descriptor defines its complete arguments; a capability ID read from project
+configuration is not an executable tool name. Arbitrary mixed-step plans are not
+accepted by the model-facing command tool.
 
 Generic exec is not a filesystem sandbox. Do not assume an omitted resource environment variable makes a path unreadable; actual service-user OS permissions remain authoritative.
 

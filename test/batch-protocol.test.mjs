@@ -69,7 +69,7 @@ test('legacy capability/edit envelopes remain unchanged while task transition is
   const edit = {...identity(), operations: [operation()], verification: [{capability: 'verify-offline', parameters: {}}], commitSubject: 'Fix example'};
   assert.equal(validateRequest(capability), capability);
   assert.equal(validateEditRequest(edit), edit);
-  assert.deepEqual(MCP_TOOL_DEFINITIONS.map(tool => tool.name), ['bridge.discover', 'bridge.run', 'bridge.get_run', 'bridge.get_result', 'bridge.publish', 'bridge.task_transition']);
+  assert.deepEqual(MCP_TOOL_DEFINITIONS.map(tool => tool.name), ["bridge.list_hosts","bridge.create_host_pairing","bridge.pause_host","bridge.resume_host","bridge.run_host_command","bridge.import_file","bridge.create_file_upload","bridge.delete_file","bridge.get_repository_configuration","bridge.execute_repository_commands","bridge.verify_repository","bridge.edit_and_verify_repository","bridge.get_run","bridge.get_result","bridge.publish","bridge.task_transition","bridge.repository_tools_status"]);
   assert.deepEqual(MCP_TOOL_DEFINITIONS.find(tool => tool.name === 'bridge.publish').inputSchema.required, ['runId']);
 });
 

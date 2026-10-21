@@ -1,6 +1,6 @@
 # Durable Agent Task Runtime
 
-Issue #45 adds a small coordination runtime above Bridge's existing batch execution plane. It does not replace GitHub as engineering truth. The public surface keeps the five execution/evidence tools and adds one fenced lifecycle tool, `bridge.task_transition`.
+Issue #45 adds a small coordination runtime above Bridge's internal batch execution plane. It does not replace GitHub as engineering truth. The explicit user-goal tools retain one fenced lifecycle operation, `bridge.task_transition`; see [the MCP contract](CHATGPT_PLUGIN.md).
 
 ## Authority and non-goals
 
@@ -162,7 +162,7 @@ Task fencing is enforced inside Bridge at two independent boundaries:
 
 The public MCP surface does not accept model-supplied task identity. `taskKey`, `workerId` and `leaseEpoch` remain server-owned runtime identity.
 
-For cloud-hosted MCP workers, task-aware `bridge.run`, `bridge.get_run`, `bridge.get_result`, `bridge.publish` and `bridge.task_transition` accept only the opaque short-lived `taskSessionToken` issued by activation. Bridge resolves that token server-side to the authoritative task/worker/epoch mapping and then reuses the existing D1 fencing checks.
+For cloud-hosted MCP workers, task-aware repository command and verification/edit tools, `bridge.get_run`, `bridge.get_result`, `bridge.publish` and `bridge.task_transition` accept only the opaque short-lived `taskSessionToken` issued by activation. Bridge resolves that token server-side to the authoritative task/worker/epoch mapping and then reuses the existing D1 fencing checks.
 
 Successful task-bound token-authenticated operations use sliding expiry: Bridge proves that the token, operation identity, and same owner/epoch lease are current, then transactionally extends the lease and token to the same bounded expiry. Invalid or unrelated traffic does not renew ownership, and an already expired token or lease is never revived. Durable-task Run polling and evidence retrieval therefore include the token, and the Watchdog should tick a bound active Run before expiry so long execution cannot leave a still-live token behind while renewing coordination state.
 
@@ -315,7 +315,7 @@ The bootstrap contains durable pointers, not narrative implementation state.
 
 ## Production task control and scheduling
 
-The Cloudflare deployment keeps operator task control outside the six public MCP tools.
+The Cloudflare deployment keeps operator task control outside the model-facing MCP tools.
 
 Internal/operator control endpoint:
 
@@ -382,7 +382,7 @@ The standard bootstrap contains only durable pointers and generic recovery instr
 
 ## Programmable Worker activation and MCP session binding
 
-The production Cloudflare composition exposes five execution/evidence tools plus the bounded `bridge.task_transition` lifecycle tool. Task-session transport is split by client capability: cloud-hosted MCP workers carry the opaque `taskSessionToken` in task-aware `bridge.run` / `bridge.publish` / `bridge.task_transition` arguments, while programmable clients may carry the server-owned task pointers in MCP HTTP headers.
+The Cloudflare composition exposes explicit repository operations, evidence getters and the bounded `bridge.task_transition` lifecycle tool. Task-session transport is split by client capability: cloud-hosted MCP workers carry the opaque `taskSessionToken` in task-aware repository command, verification/edit, evidence, publication and transition arguments, while programmable clients may carry the server-owned task pointers in MCP HTTP headers.
 
 A launched programmable Worker activates exactly one dispatch with:
 
@@ -413,7 +413,7 @@ three MCP session headers
 OpenAI-hosted/ChatGPT MCP workers should use the opaque capability:
 
 ```text
-bridge.run(..., taskSessionToken)
+bridge.execute_repository_commands(..., taskSessionToken) / bridge.edit_and_verify_repository(..., taskSessionToken)
 bridge.publish(runId, taskSessionToken)
 bridge.task_transition(..., taskSessionToken)
 ```
@@ -480,20 +480,23 @@ dispatch
 -> Worker inspects checkpoint -> HEAD evidence
 ```
 
-A bounded stage is supplied by the Worker/harness as ordered #39 batch steps. The loop forcibly binds:
+A programmable local harness may compile a bounded stage into internal #39
+batch steps. A cloud MCP Worker instead uses the explicit command or
+edit-and-verify tool with its closed input schema; it supplies no mixed plan.
+Both paths forcibly bind:
 
 ```text
 repository = durable task repository
 targetRef = canonical branch
 targetSha = recovered exact HEAD
 taskContext = task key + current lease epoch
-mode = batch
+the selected fixed operation (or internal batch envelope for the local harness)
 ```
 
 The execution path remains:
 
 ```text
-bridge.run(batch)
+bridge.execute_repository_commands / bridge.edit_and_verify_repository
 -> bridge.get_run
 -> bridge.get_result
 -> VERIFIED ? bridge.publish(runId) : require SUCCEEDED/no edit

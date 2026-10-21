@@ -480,6 +480,27 @@ export class D1DirectAssetStore {
     return {...normalize(row),objectKey:row.object_key};
   }
 
+  async markDeletedOwned({principal,assetId:value}={}) {
+    const active=assertAuthenticatedPrincipal(principal);
+    const id=assetId(value);
+    const now=this.clock();
+    const row=await this.db.prepare(
+      `UPDATE direct_assets
+       SET status='EXPIRED',
+           expires_at=?,
+           upload_token_sha256=NULL,
+           source_kind=NULL,
+           source_ref=NULL
+       WHERE asset_id=?
+         AND bridge_user_id=?
+         AND status='READY'
+         AND persistent=1
+       RETURNING *`
+    ).bind(now,id,active.bridgeUserId).first();
+    assertBridge(row,'DIRECT_ASSET_DENIED',`persistent asset is not ready or not owned: ${id}`);
+    return normalize(row);
+  }
+
   async authorizeUpload({assetId:value,uploadTokenSha256}={}) {
     const id=assetId(value);
     const token=tokenHash(uploadTokenSha256);

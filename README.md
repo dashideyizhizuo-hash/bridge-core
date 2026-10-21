@@ -23,11 +23,19 @@ ChatGPT / Codex
 
 Direct Exec is the simple default for ordinary host commands and local tools. GitHub Exec remains the durable engineering path for source mutation, trusted verification and publication. Neither path requires an inbound public port on the host.
 
-The public MCP surface is intentionally fixed at six tools:
+The explicit-tool release candidate separates Host discovery, pairing, execution
+controls, commands, temporary files and repository work into 17 fixed tools.
+Trusted additional project presets have independently declared input schemas.
+See [the MCP contract](docs/CHATGPT_PLUGIN.md) for the complete tool list.
+This is source preparation; verify the actual deployed tool inventory and the
+Host 0.5.0 candidate before claiming installation or runtime acceptance.
 
 ```text
-bridge.discover
-bridge.run
+bridge.list_hosts -> bridge.run_host_command
+bridge.import_file -> bridge.run_host_command
+bridge.get_repository_configuration
+  -> bridge.execute_repository_commands / bridge.verify_repository
+  / bridge.edit_and_verify_repository
 bridge.get_run
 bridge.get_result
 bridge.publish
@@ -89,17 +97,22 @@ one Run
 
 Named capabilities are presets over the generic execution substrate, not a second execution engine.
 
-Legacy capability/edit requests and the `workspace-exec` compatibility entry remain supported where existing callers still use them. New orchestration should prefer ordered batch Runs.
+Internal request envelopes remain implementation details. Model callers use
+separate command, fixed-verification and edit-and-verify tools, with exact policy
+preconditions and the actual returned Run identity. Extra trusted observe/verify presets
+must have independent descriptors upfront; arbitrary mixed-step plans are not
+public tool inputs.
 
 ## Direct Exec
 
 Bridge also provides a host-first Direct Exec plane for ordinary operations that do not need Git engineering semantics.
 
-After one host is enrolled and its outbound runner loop is running, a single-host call can be as small as:
+After enrolling a Host, list the owned computers and select its returned logical
+`hostId`. With its outbound runner running, call:
 
 ```text
-bridge.run(
-  mode = direct,
+bridge.run_host_command(
+  hostId = <returned hostId>,
   argv = ["ai-artist", "feedback-snapshot", "--hours", "48"]
 )
 ```
@@ -121,18 +134,18 @@ The canonical ChatGPT path is MCP-native:
 
 ```text
 ChatGPT file
--> bridge.run(mode="asset", file=<authorized file param>)
+-> bridge.import_file(file=<authorized file param>)
 -> Bridge fetches + hashes + stores private R2
 -> READY temporary assetId + expiresAt
--> bridge.run(mode="direct", assets=[assetId], argv=[..., "{asset:0}"])
+-> bridge.run_host_command(hostId=<returned hostId>, assets=[assetId], argv=[..., "{asset:0}"])
 -> runner verifies SHA-256 and stages locally
 ```
 
 Host outputs use declared slots rather than arbitrary host paths:
 
 ```text
-bridge.run(
-  mode="direct",
+bridge.run_host_command(
+  hostId=<returned hostId>,
   exports=[{fileName,mimeType,maxBytes,required}],
   argv=[..., "{export:0}"]
 )
@@ -143,9 +156,9 @@ bridge.run(
 -> authenticated MCP resource read
 ```
 
-Files imported/exported through the canonical agent path are reusable,
-principal-owned private R2 objects. The older one-time upload-ticket + raw PUT
-flow remains only as a low-level compatibility path.
+Files imported/exported through the native agent path are reusable,
+principal-owned private R2 objects. Programmable byte-upload clients use the
+separate `bridge.create_file_upload` operation followed by protected raw PUT.
 
 Direct files are capped at 25 MiB each, with at most 8 input assets and 8 export
 slots per Direct Run. See [Direct Assets](docs/DIRECT_ASSETS.md).
@@ -157,7 +170,7 @@ Customers do not configure Cloudflare, Wrangler, GitHub PATs, SSH keys or Direct
 An authenticated Bridge user creates a short-lived pairing capability:
 
 ```text
-bridge.run(mode="connect")
+bridge.create_host_pairing()
 ```
 
 On the customer machine, the minimal host client performs the one-time binding:
@@ -347,7 +360,7 @@ outer wrapper command line does not carry it. Internally, `bridge-chat` sends
 all OpenCLI arguments through a bounded stdin channel.
 
 Prefer `launch` for a Durable Task Runtime dispatch. It provisions a fresh
-ordinary Chat and asks it to complete a harmless `bridge.discover` call before
+ordinary Chat and asks it to complete a harmless `bridge.get_repository_configuration` call for the target repository before
 activation. The nonce-bound response is an availability screen, not trusted
 authorization evidence; Bridge fencing remains the authority boundary. A
 missing, failed, or ambiguous probe is rejected before dispatch consumption.
@@ -387,9 +400,14 @@ skills/
   continuous-github-development/
 ```
 
-`plugin.json` references `.app.json`, which binds the package to the already-registered production Bridge ChatGPT app. The private marketplace entry installs the repository-backed `runner-bridge` plugin from this repository. These packaging files do not create a second MCP server, OAuth flow or authority model.
+`plugin.json` references `.app.json`, whose exported App map is empty. Configure
+your own verified connected App with the existing `BRIDGE_APP_ID` packaging
+option when that client requires a binding. Never copy another deployment's
+production App ID. The repository-backed `runner-bridge` package teaches the
+configured service's workflow; packaging does not create a server, OAuth grant
+or execution authority.
 
-The Skill layer teaches agents how to use Bridge; it does not grant execution authority. A fresh ChatGPT acceptance still needs to prove that the installed/attached package exposes the existing Skills and six-tool Remote MCP in the client.
+The Skill layer teaches agents how to use Bridge; it does not grant execution authority. A fresh ChatGPT acceptance still needs to prove that the installed package exposes the expected Skills and explicit MCP tools for the owner's deployment.
 
 ## Security invariants
 

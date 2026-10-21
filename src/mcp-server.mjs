@@ -2,17 +2,9 @@ import { createMcpHandler, fromJsonSchema, McpServer, ResourceTemplate } from '@
 import { Buffer } from 'node:buffer';
 import { assertBridge, errorEnvelope } from './errors.mjs';
 import { MCP_TOOL_DEFINITIONS } from './mcp-tools.mjs';
-import { directWaitSeconds, waitForDirectResult } from './direct-run-wait.mjs';
+import {invokePublicTool} from './mcp-public-api.mjs';
+import {availableRepositoryTools,invokeRepositoryTool,isRepositoryTool} from './mcp-repository-catalog.mjs';
 import {readBoundedBody} from './cloudflare/request-body.mjs';
-
-const TOOL_METHODS = Object.freeze({
-  'bridge.discover': 'discover',
-  'bridge.run': 'run',
-  'bridge.get_run': 'getRun',
-  'bridge.get_result': 'getResult',
-  'bridge.publish': 'publish',
-  'bridge.task_transition': 'transitionTask'
-});
 
 const CORE_GATEWAY_METHODS=Object.freeze([
   'discover','run','getRun','getResult','publish'
@@ -99,25 +91,6 @@ function failureResult(error) {
   };
 }
 
-async function invoke(gateway, toolName, args, signal) {
-  const method = TOOL_METHODS[toolName];
-  assertBridge(typeof method === 'string', 'UNKNOWN_MCP_TOOL', `unknown MCP tool: ${toolName}`);
-  assertBridge(
-    typeof gateway[method]==='function',
-    toolName==='bridge.task_transition' ? 'TASK_SESSION_REQUIRED' : 'GATEWAY_CONFIG_INVALID',
-    toolName==='bridge.task_transition'
-      ? 'bridge.task_transition requires an active durable task session'
-      : `gateway missing method: ${method}`
-  );
-  if(toolName==='bridge.run') {
-    const seconds=directWaitSeconds(args);
-    const {waitSeconds,...executionArgs}=args;
-    const receipt=await gateway[method](executionArgs);
-    return seconds===0 ? receipt : waitForDirectResult(gateway,receipt,seconds,{signal});
-  }
-  return gateway[method](args);
-}
-
 function splitTaskSessionToken(args) {
   if(!args || typeof args!=='object' || Array.isArray(args)) {
     return {taskSessionToken:null,args:args ?? {}};
@@ -133,6 +106,7 @@ export function createBridgeMcpHandler({
   gateway,
   gatewayForRequest,
   gatewayForTool,
+  repositoryCatalogCache,
   clock=()=>Date.now()
 } = {}) {
   assertBridge(
@@ -147,7 +121,7 @@ export function createBridgeMcpHandler({
       : () => gateway;
 
   const handlers=new Set();
-  const createHandler=scope=>createMcpHandler(context => {
+  const createHandler=scope=>createMcpHandler(async context => {
     const baseGateway = assertGateway(
       resolveGateway({
         authInfo: context?.authInfo,
@@ -157,7 +131,7 @@ export function createBridgeMcpHandler({
 
     const server = new McpServer({
       name: 'runner-bridge',
-      version: '0.3.0'
+      version: '0.5.0'
     },{maxToolInputElements:10_000});
 
     server.registerResource(
@@ -185,11 +159,15 @@ export function createBridgeMcpHandler({
       }
     );
 
-    for (const definition of MCP_TOOL_DEFINITIONS) {
+    const needsCatalog=scope?.method==='tools/list'||isRepositoryTool(scope?.toolName)||scope?.toolName==='bridge.repository_tools_status';
+    const catalog=needsCatalog?await availableRepositoryTools(baseGateway,{cache:repositoryCatalogCache,forceRefresh:scope?.toolName==='bridge.repository_tools_status',requestedTool:isRepositoryTool(scope?.toolName)?scope.toolName:undefined,signal:scope?.signal}):{status:'not-requested',definitions:[],errors:[],repositories:[]};
+    for (const definition of [...MCP_TOOL_DEFINITIONS,...catalog.definitions]) {
       server.registerTool(
         definition.name,
         {
+          title:definition.title,
           description: definition.description,
+          annotations:definition.annotations,
           inputSchema: fromJsonSchema(definition.inputSchema),
           ...(definition._meta===undefined ? {} : {_meta:definition._meta})
         },
@@ -213,12 +191,17 @@ export function createBridgeMcpHandler({
               }));
             }
             return await successResult(
-              await invoke(activeGateway, definition.name, separated.args,scope?.signal),
+              definition.name==='bridge.repository_tools_status'
+                ? {status:catalog.status,toolNames:catalog.definitions.map(item=>item.name),repositories:catalog.repositories,errors:catalog.errors}
+                : definition.operation
+                  ? await invokeRepositoryTool(activeGateway,definition,separated.args)
+                  : await invokePublicTool(activeGateway,definition.name,separated.args,{signal:scope?.signal}),
               activeGateway,
               definition.name,
               clock
             );
           } catch (error) {
+            if(['POLICY_STALE','REPOSITORY_DENIED'].includes(error?.code))await repositoryCatalogCache?.invalidate();
             return failureResult(error);
           }
         }
@@ -230,6 +213,7 @@ export function createBridgeMcpHandler({
   return {
     async close(){await Promise.all([...handlers].map(handler=>handler.close()));},
     async fetch(request,...args) {
+      let method,toolName;
       // Bound and cancel the original source before SDK request classification
       // can clone/tee it. File payload bytes use the separate asset endpoints.
       if(request.method==='POST'&&request.body){
@@ -239,6 +223,8 @@ export function createBridgeMcpHandler({
           if(error?.code!=='MCP_REQUEST_TOO_LARGE')throw error;
           return Response.json({jsonrpc:'2.0',id:null,error:{code:-32600,message:'MCP request body exceeds the 2 MiB limit or has an invalid length'}},{status:413,headers:{'cache-control':'no-store'}});
         }
+        // Routing hints never bypass SDK argument or authentication validation.
+        try {const hint=JSON.parse(new TextDecoder().decode(bytes));method=hint?.method;toolName=hint?.params?.name;}catch{}
         request=new Request(request,{body:bytes});
       }
       const holds=new Set(),cancellation=new AbortController();let reader,finished=false,streamController,ready,ending;
@@ -261,7 +247,7 @@ export function createBridgeMcpHandler({
         return ending;
       };
       request.signal?.addEventListener('abort',abort,{once:true});
-      const scope={signal:cancellation.signal,hold(lease){
+      const scope={method,toolName,signal:cancellation.signal,hold(lease){
         if(finished){lease.release();throw new Error('File response is closed');}
         holds.add(lease);lease.signal.addEventListener('abort',abort,{once:true});
         if(lease.signal.aborted)void abort();

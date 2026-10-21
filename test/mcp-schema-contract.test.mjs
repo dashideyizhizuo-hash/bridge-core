@@ -22,12 +22,12 @@ test('SDK wire tool definitions have concrete input types and array items before
   await client.connect(new StreamableHTTPClientTransport(new URL('https://schema.example/mcp'),{fetch:(input,init)=>handler.fetch(new Request(input,init))}));
   const {tools}=await client.listTools();
   for(const tool of tools)assertConcreteSchema(tool.inputSchema,tool.name);
-  const run=tools.find(tool=>tool.name==='bridge.run');assert.deepEqual(run._meta['openai/fileParams'],['file']);
+  const run=tools.find(tool=>tool.name==='bridge.import_file');assert.deepEqual(run._meta['openai/fileParams'],['file']);
   const file=run.inputSchema.properties.file;
   const resolved=file.$ref?file.$ref.slice(2).split('/').reduce((value,key)=>value?.[key],run.inputSchema):file;
   assert.equal(resolved.type,'object');assert.equal(resolved.additionalProperties,false);
   assert.deepEqual(Object.keys(resolved.properties).sort(),['download_url','file_id','file_name','mime_type']);
   assert.deepEqual([...resolved.required].sort(),['download_url','file_id']);
   for(const value of Object.values(resolved.properties))assert.equal(value.type,'string');
-  assert.deepEqual(run.inputSchema.required,['mode'],'file remains optional for non-asset modes');
+  assert.deepEqual(run.inputSchema.required,['file'],'only file import declares a native file parameter');
 });

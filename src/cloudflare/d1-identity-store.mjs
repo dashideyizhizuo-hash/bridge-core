@@ -407,6 +407,17 @@ export class D1BridgeIdentityStore {
     await this.db.batch(statements);
   }
 
+  async list({principal}={}) {
+    const owner=assertAuthenticatedPrincipal(principal);
+    const rows=await this.db.prepare(`SELECT DISTINCT rg.repository_full_name
+      FROM repository_grants rg JOIN user_installation_grants uig
+        ON uig.bridge_user_id=rg.bridge_user_id AND uig.installation_id=rg.installation_id
+      JOIN github_installations gi ON gi.installation_id=rg.installation_id
+      WHERE rg.bridge_user_id=? AND rg.can_read=1 AND gi.suspended_at IS NULL
+      ORDER BY rg.repository_full_name LIMIT 17`).bind(owner.bridgeUserId).all();
+    return (rows.results??[]).map(row=>row.repository_full_name);
+  }
+
   async assert({principal,repository,permission}={}) {
     const authenticatedPrincipal=assertAuthenticatedPrincipal(principal);
     const repo=repositoryName(repository);

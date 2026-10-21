@@ -254,6 +254,18 @@ export class GitHubTransport {
     return this.authorizer.assertRepository(repositoryName(repository), permission);
   }
 
+  async listRepositories() {
+    if(typeof this.authorizer.listRepositories!=='function')return [];
+    const repositories=await this.authorizer.listRepositories();
+    assertBridge(Array.isArray(repositories)&&repositories.length<=17,
+      'REPOSITORY_AUTHORIZATION_INVALID','repository inventory must contain at most 17 entries');
+    const names=[...new Set(repositories.map(repositoryName))].sort();
+    // A custom inventory hook supplies names, never grants. Do not query a
+    // GitHub account-wide repository endpoint to expand the configured set.
+    for(const repository of names)await this.#authorize(repository,'read');
+    return names;
+  }
+
   async resolveRepository(repository) {
     const repo = await this.#authorize(repository, 'read');
     const metadata = await this.github.request('GET', `/repos/${repo}`);

@@ -275,7 +275,7 @@ MCP authorize
   -> D1 authority commit
   -> Cloudflare completeAuthorization
   -> MCP token props
-  -> tools/list == exactly six tools
+  -> tools/list == explicit fixed tools plus any permitted upfront preset descriptors; inspect repository_tools_status for catalog availability
 ```
 
 Negative acceptance must also prove:

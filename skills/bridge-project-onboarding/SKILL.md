@@ -17,8 +17,8 @@ Use this Skill only when a GitHub repository must become a Bridge **engineering*
 Do **not** invoke repository onboarding merely to run ordinary host commands, installed CLIs, browser automation, local SQLite/data inspection, media conversion or other non-Git operations. Those should use the host-first Direct Exec plane after one host-level enrollment:
 
 ```text
-bridge.discover()
--> bridge.run(mode="direct", argv=[...])
+bridge.list_hosts()
+-> bridge.run_host_command(hostId=<returned hostId>, argv=[...])
 -> bridge.get_run
 -> bridge.get_result
 ```
@@ -51,12 +51,20 @@ The merge writes a private file mode, so verify intended runner read access afte
 installation. The administrator-owned policy and parent directory must remain
 unwritable by target code. Existing unrelated entries/resources must be preserved.
 
-Host npm 0.4.2 does not include this bootstrap CLI. Obtain it from the public
+Host npm 0.5.0 does not include this bootstrap CLI. Verify the actual Host release
+and connected server before installation. Obtain bootstrap from the public
 `dashideyizhizuo-hash/bridge-core` source at an accepted exact SHA; no private
 operated-service source is needed. The runtime repository and SHA must refer to
 the same accessible source. Node.js 22+ suffices for the bootstrap path. Public
 source availability does not authorize changing the runtime repository as an
 acceptance target.
+
+The trusted default-branch policy must explicitly define `mcp.verification` for
+the fixed verification recipe used by `bridge.verify_repository` and
+`bridge.edit_and_verify_repository`. Check the actual generated policy; an older
+bootstrap that omits that recipe is not sufficient for these tools. Configure
+the real required checks through the reviewed default-branch policy, not tool
+arguments or a candidate edit. Missing recipe fails closed.
 
 Bootstrap neither creates a real quality-gate script nor installs project
 dependencies. Supply the actual trusted verifier argv; prepare a repository-owned
@@ -95,17 +103,21 @@ bridge.publish(runId)
 GitHub target branch
 ```
 
-A correctly onboarded repository should support the five-tool execution loop:
+A correctly onboarded repository supports this explicit engineering loop:
 
 ```text
-bridge.discover
-→ bridge.run
+bridge.get_repository_configuration
+→ bridge.execute_repository_commands / bridge.verify_repository
+  / bridge.edit_and_verify_repository
 → bridge.get_run
 → bridge.get_result
 → bridge.publish
 ```
 
-Do not add repository-specific MCP tools unless the Bridge architecture itself changes. Named capabilities are presets over the common execution substrate.
+Additional trusted observe/verify presets may appear as independent tools in the
+initial tool list. Use their actual server-generated names and closed schemas;
+an ID mentioned in configuration does not itself authorize a generic dispatch.
+The command tool accepts only argv command records, not mixed execution steps.
 
 ---
 
@@ -517,6 +529,11 @@ Example:
       }
     }
   },
+  "mcp": {
+    "verification": [
+      {"capability": "verify", "parameters": {}}
+    ]
+  },
   "workspaceExec": {
     "enabled": true,
     "runner": "ci",
@@ -565,6 +582,11 @@ Do not copy Crypto-specific paths/resources into unrelated repositories.
 # 8. Verification preset
 
 Every autonomous coding repository should have at least one trusted `verify` capability.
+
+Declare the required 1–4 checks and fixed parameter values in
+`mcp.verification`, as in the example above. Each entry must resolve to a
+declared `class: "verify"` preset. The fixed verification/edit tools read this
+recipe from the trusted default policy; callers do not select or replace it.
 
 It should execute the project's real quality gate.
 
@@ -729,20 +751,29 @@ If the app is installed for all repositories, Bridge's own repository grant rema
 
 # 13. Connect ChatGPT / MCP
 
-After deployment, ChatGPT should expose exactly these six public tools:
+After deployment, inspect the actual tool list for the required engineering
+tools, with explicit input schemas and safety annotations:
 
 ```text
-bridge.discover
-bridge.run
+bridge.get_repository_configuration
+bridge.execute_repository_commands
+bridge.verify_repository
+bridge.edit_and_verify_repository
 bridge.get_run
 bridge.get_result
 bridge.publish
 bridge.task_transition
 ```
 
-If batch runtime works through GitHub workflows but `bridge.run(mode=batch)` fails at the public MCP layer, inspect request-scoped transport delegation before touching the runtime.
+If an internal batch works through GitHub workflows but the explicit repository
+command tool fails, inspect its request-scoped translation and transport before
+changing the runner runtime. Carry the discovered policy SHA as
+`expectedPolicySha` and retain the actual returned `runId`.
 
-Do not add another public tool for a repository-specific operation. `bridge.task_transition` is reserved for the common Durable Task Runtime and grants no repository-specific execution authority.
+Separately exposed presets must come from the trusted default policy and be
+present upfront with their full parameter schema. Refresh client tool discovery
+after a reviewed catalog change. `bridge.task_transition` remains the common
+fenced lifecycle tool and grants no additional repository execution authority.
 
 ---
 
@@ -751,7 +782,7 @@ Do not add another public tool for a repository-specific operation. `bridge.task
 Call:
 
 ```text
-bridge.discover(repository)
+bridge.get_repository_configuration(repository)
 ```
 
 Confirm:
@@ -773,15 +804,15 @@ A 404 for `.bridge/project.json` means repository onboarding is incomplete.
 
 ---
 
-# 15. Read-only batch acceptance
+# 15. Repository command acceptance
 
-Before edit/publish, run a small batch:
+Before edit/publish, authorize a small synthetic-data check and call
+`bridge.execute_repository_commands` with explicit command IDs, bounded argv,
+the chosen repository/target and actual `expectedPolicySha`. Only commands belong in this input:
 
 ```text
-1. generic exec
-2. named observe preset
-3. generic exec using a logical resource
-4. trusted verify
+1. inspect the workspace without changing source
+2. read only the approved logical resource, if this project needs one
 ```
 
 Require:
@@ -793,6 +824,11 @@ workspace.shared = true
 ```
 
 Confirm resource roots are redacted.
+
+Then run `bridge.verify_repository` for the fixed trusted recipe. Any additional
+observe/verify preset is a separate call to a tool already exposed upfront with
+its full schema. Separate Runs do not share scratch state. Configuration IDs
+and arbitrary mixed steps are not dispatch inputs.
 
 Common failures:
 
@@ -806,15 +842,16 @@ Usually means host policy did not opt into generic exec or the requested resourc
 
 # 16. Full edit acceptance
 
-Run one bounded batch:
+Call `bridge.edit_and_verify_repository` for one approved benign change. Supply
+only the exact repository/target/policy precondition,
+bounded `replace-exact` / `apply-patch` edits and commit subject. The server runs
+the mandatory trusted `mcp.verification` recipe after editing:
 
 ```text
-1. optional bootstrap
-2. exec: inspect status
-3. optional observe preset
-4. optional generic resource exec
-5. one benign edit
-6. trusted verify tail
+1. validate current repository, policy and task authority
+2. apply permitted edits to the pinned target
+3. run the fixed required checks
+4. emit verified candidate evidence or the actual failure
 ```
 
 The final result must be:
@@ -842,8 +879,6 @@ treeSha
 diffSha256
 changedFiles
 verificationResultSha256
-workspace.materializations
-workspace.shared
 runner class
 host ID
 ```
@@ -913,7 +948,7 @@ Before every substantial Bridge task:
 10. Write a durable checkpoint with exact identities.
 
 If this repository is enrolled in Durable Task Runtime, also verify the task-session transport used by the intended Agent:
-- cloud-hosted MCP Worker: activation returns an opaque `taskSessionToken`, and task-aware `bridge.run` / `bridge.publish` / `bridge.task_transition` accept it;
+- cloud-hosted MCP Worker: activation returns an opaque `taskSessionToken`; include it on task-aware repository configuration, command, verification/edit, result, publication and `bridge.task_transition` calls;
 - programmable MCP client: the three task-session headers may be used;
 - in both cases, OAuth/repository authorization and current D1 fencing remain mandatory;
 - the model must not supply authoritative `workerId` / `leaseEpoch` itself.
@@ -974,7 +1009,7 @@ Micro Apps
 
 Do not give Micro Apps `cql-data` simply because it uses the same physical host.
 
-If `bridge.discover(micro-apps-infra)` returns missing `.bridge/project.json`, repository onboarding is not complete even if D1 `can_publish=1`.
+If `bridge.get_repository_configuration(micro-apps-infra)` returns missing `.bridge/project.json`, repository onboarding is not complete even if D1 `can_publish=1`.
 
 ---
 
@@ -1097,14 +1132,14 @@ A new repository is fully onboarded only when all are true:
 [ ] host policy validates
 [ ] required logical resources healthy
 [ ] .bridge/project.json merged on default branch
-[ ] trusted verify preset exists
+[ ] trusted mcp.verification recipe exists and names the real required checks
 [ ] gateway workflow installed
 [ ] publish workflow installed
 [ ] repository grant read=1
 [ ] repository grant run=1
 [ ] repository grant publish=1
-[ ] bridge.discover PASS
-[ ] read-only batch PASS
+[ ] bridge.get_repository_configuration PASS
+[ ] explicitly authorized bounded repository commands PASS
 [ ] one workspace proven
 [ ] resource redaction proven
 [ ] edit PASS
@@ -1152,13 +1187,13 @@ Logical resources:
 Repository grant:
 read/run/publish
 
-discover:
+repository configuration:
 PASS/FAIL
 
-read-only batch:
+bounded repository commands:
 PASS/FAIL
 
-edit batch:
+edit and fixed verification:
 VERIFIED/FAIL
 
 runId:

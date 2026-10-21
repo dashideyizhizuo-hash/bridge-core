@@ -52,7 +52,7 @@ export async function loginForHostPairing({endpoint,onAuthorization=()=>{},openB
       authProvider:{token:async()=>tokens.access_token},fetch:fetchFn
     });
     await client.connect(transport);
-    const reply=await client.callTool({name:'bridge.run',arguments:{mode:'connect'}});
+    const reply=await client.callTool({name:'bridge.create_host_pairing',arguments:{}});
     if(reply.isError) {
       const code=reply.structuredContent?.error?.code;
       throw new BridgeError(typeof code==='string'&&/^[A-Z][A-Z0-9_]{2,63}$/.test(code)?code:'HOST_PAIRING_REJECTED',

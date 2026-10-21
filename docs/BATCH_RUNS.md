@@ -1,4 +1,4 @@
-# Batch Run v1 — Issue #39 contract
+# Internal Batch Run v1 — Issue #39 contract
 
 This is the protocol lock for the six implementation slices in #39, not a new
 Bridge architecture. Slice 1 defines and tests the contract; later slices wire
@@ -7,7 +7,7 @@ alone does **not** mean the deployed MCP endpoint accepts batches.
 
 ## One Run, one workspace
 
-One `bridge.run` submits a bounded, ordered batch. The trusted workflow
+One internal batch request describes bounded ordered work. The trusted workflow
 materializes the exact target once. Every step uses that workspace; no step
 checks out another tree or fetches another revision. Changes and scratch files
 remain visible to later steps. The workspace is discarded as a unit when the
@@ -16,19 +16,24 @@ Run ends. A new Run starts clean from its own exact target SHA.
 Git object reuse is permitted. Persistent dirty sessions, per-command worktrees,
 DAGs, loops, conditions, retry languages and a custom cache manager are not.
 
-The public tool names stay exactly:
+Model callers use separate user-goal tools; see [the MCP contract](CHATGPT_PLUGIN.md):
 
 ```
-bridge.discover  bridge.run  bridge.get_run  bridge.get_result  bridge.publish  bridge.task_transition
+bridge.execute_repository_commands
+bridge.verify_repository
+bridge.edit_and_verify_repository
+bridge.get_run  bridge.get_result  bridge.publish  bridge.task_transition
 ```
 
 ## Request
 
-The new public input is `mode: "batch"`, the existing repository/targetRef and
-optional asserted targetSha, plus `steps` and, for an edited Run, `commitSubject`.
-The caller never chooses policy SHA, host paths, runner labels, environment
-variables or publication credentials. The gateway resolves the trusted default
-policy and target identities just as it does for existing requests.
+The internal envelope contains `mode: "batch"`, exact repository/target/policy
+identity and server-compiled `steps`. The public command tool accepts only
+command records; the verification/edit tools obtain required checks from trusted
+`mcp.verification`. Callers assert `expectedPolicySha` but cannot select another
+authority source, supply mixed steps, Host paths, runner labels, environment
+overrides or publication credentials. The mixed example below documents the
+runner protocol; it is not an accepted public tool invocation.
 
 Durable request (`schemas/batch-request.schema.json`):
 
@@ -52,8 +57,8 @@ Durable request (`schemas/batch-request.schema.json`):
 }
 ```
 
-`schemaVersion: 1` and `mode: "batch"` identify the new contract. Do not add a
-second version counter or a second public tool. Old shapes remain unambiguous:
+`schemaVersion: 1` and `mode: "batch"` identify this internal contract.
+Its shapes remain unambiguous:
 capability requests contain `capability`, edit requests contain `operations`,
 batch requests contain `mode: "batch"` and `steps`. Mixed shapes are invalid.
 

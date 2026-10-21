@@ -7,11 +7,11 @@ The common case is intentionally small:
 ```text
 enroll one host once
 -> keep one outbound runner loop alive
--> bridge.run(mode="direct", argv=[...])
+-> bridge.run_host_command(hostId=<returned hostId>, argv=[...])
 -> bridge.get_run / bridge.get_result
 ```
 
-With exactly one enabled host owned by the current Bridge principal, callers do not need to name the host.
+Choose an actual returned `hostId` explicitly, including when there is one Host.
 
 No GitHub repository, `.bridge/project.json`, target workflow, target SHA, or repository grant is required for Direct Exec.
 
@@ -20,16 +20,14 @@ GitHub-backed execution remains the engineering plane for source edits, trusted 
 ## Bounded result waiting
 
 Direct commands wait up to 10 seconds by default: call
-`bridge.run(mode="direct", argv=[...])`. A completed Run returns the same bounded
+`bridge.run_host_command(hostId=<returned hostId>, argv=[...])`. A completed Run returns the same bounded
 evidence as `bridge.get_result` in that response. Set `waitSeconds: 0` for an
 immediate async receipt, or an integer from 1–10 for a shorter explicit window.
 The optional integer is bounded to 0–10 and applies
 only to Direct Exec; it does not change `timeoutSeconds` or Host execution limits.
 
-Clients with cached tool definitions also get the default wait without sending
-a new parameter. Reload or reconnect to discover the `waitSeconds` override,
-including `0` for immediate return. Confirm the actual result; passing a new
-field through a stale client interface is not proof it was sent.
+Refresh client tool discovery when the deployed descriptor changes. Confirm the
+actual result; passing a field through a stale interface is not proof it was sent.
 
 Bridge first admits the canonical Run, then polls its principal-scoped state at
 most once per second (up to 11 state reads). This includes Host queue latency;
@@ -78,11 +76,11 @@ The cloud caller can request only a relative `cwd`. The service account and OS A
 
 ## Agent call
 
-Single-host default:
+After `bridge.list_hosts`, call `bridge.run_host_command` with its returned Host:
 
 ```json
 {
-  "mode": "direct",
+  "hostId": "<returned owned host ID>",
   "argv": ["ai-artist", "feedback-snapshot", "--hours", "48"]
 }
 ```
@@ -91,18 +89,17 @@ Optional:
 
 ```json
 {
-  "mode": "direct",
-  "host": "wsl-main",
+  "hostId": "<returned owned host ID>",
   "argv": ["python", "script.py"],
   "cwd": "tools",
   "timeoutSeconds": 120
 }
 ```
 
-The public tool surface does not grow. Direct runs reuse:
+Direct commands use their dedicated tool and shared evidence getters:
 
 ```text
-bridge.run
+bridge.run_host_command
 bridge.get_run
 bridge.get_result
 ```
@@ -134,7 +131,7 @@ The normal customer flow is:
 
 ```text
 authenticated Bridge connector
-  -> bridge.run(mode="connect")
+  -> bridge.create_host_pairing()
   -> short-lived signed pairing capability
 
 customer host
@@ -300,7 +297,7 @@ with the service-level Direct admin bearer token and:
 
 Disabling a host cancels queued/running Direct Run state. The active runner observes the revocation on heartbeat and terminates its local process group.
 
-`bridge.discover()` without a repository returns Direct host status including `enabled` and `lastSeenAt`, plus `defaultHost` when exactly one enabled host exists.
+`bridge.list_hosts()` without a repository returns Direct host status including `enabled` and `lastSeenAt`, plus `defaultHost` when exactly one enabled host exists.
 
 ## Delivery semantics
 

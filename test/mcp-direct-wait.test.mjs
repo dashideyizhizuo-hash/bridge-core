@@ -25,36 +25,35 @@ function fixture() {
 }
 test('Direct MCP wait returns completed bounded output after exactly one submission',async t=>{
   const f=fixture(),client=await clientFor(t,f.gateway);
-  const response=await client.callTool({name:'bridge.run',arguments:{mode:'direct',argv:['whoami'],waitSeconds:10}});
+  const response=await client.callTool({name:'bridge.run_host_command',arguments:{hostId:'host-a',argv:['whoami'],waitSeconds:10}});
   assert.equal(response.isError,undefined);assert.deepEqual(response.structuredContent,result);
   assert.deepEqual(f.calls,{submit:1,state:1,result:1});
-  assert.deepEqual(f.inputs,[{mode:'direct',argv:['whoami']}],'wait is not an execution/billing identity parameter');
+  assert.deepEqual(f.inputs,[{mode:'direct',host:'host-a',argv:['whoami']}],'wait is not an execution identity parameter');
 });
-test('omitted Direct wait returns completed output for clients with older tool schemas',async t=>{
+test('omitted Direct wait returns completed output by default',async t=>{
   const f=fixture(),client=await clientFor(t,f.gateway);
-  const response=await client.callTool({name:'bridge.run',arguments:{mode:'direct',argv:['whoami']}});
+  const response=await client.callTool({name:'bridge.run_host_command',arguments:{hostId:'host-a',argv:['whoami']}});
   assert.equal(response.isError,undefined);assert.deepEqual(response.structuredContent,result);
   assert.deepEqual(f.calls,{submit:1,state:1,result:1});
-  assert.deepEqual(f.inputs,[{mode:'direct',argv:['whoami']}]);
+  assert.deepEqual(f.inputs,[{mode:'direct',host:'host-a',argv:['whoami']}]);
 });
 test('explicit zero wait preserves immediate async receipt without polling',async t=>{
   const f=fixture(),client=await clientFor(t,f.gateway);
-  const response=await client.callTool({name:'bridge.run',arguments:{mode:'direct',argv:['whoami'],waitSeconds:0}});
+  const response=await client.callTool({name:'bridge.run_host_command',arguments:{hostId:'host-a',argv:['whoami'],waitSeconds:0}});
   assert.deepEqual(response.structuredContent,receipt);
   assert.deepEqual(f.calls,{submit:1,state:0,result:0});
 });
-test('non-Direct calls without wait keep their original behavior',async t=>{
-  const f=fixture(),client=await clientFor(t,f.gateway);
-  for(const mode of ['host','connect','asset','capability','edit','batch']) {
-    const response=await client.callTool({name:'bridge.run',arguments:{mode}});
-    assert.equal(response.isError,undefined);assert.deepEqual(response.structuredContent,receipt);
-  }
-  assert.deepEqual(f.calls,{submit:6,state:0,result:0});
+test('independent non-command calls do not poll command state',async t=>{
+ const f=fixture(),client=await clientFor(t,f.gateway);
+ for(const [name,args] of [['bridge.create_host_pairing',{}],['bridge.pause_host',{hostId:'host-a'}],['bridge.resume_host',{hostId:'host-a'}]]){
+ const response=await client.callTool({name,arguments:args});assert.equal(response.isError,undefined);assert.deepEqual(response.structuredContent,receipt);}
+ assert.deepEqual(f.calls,{submit:3,state:0,result:0});
 });
+
 test('wait timeout returns the same running ID; a later result read never submits again',async t=>{
   const f=fixture();f.gateway.getRun=async()=>{f.calls.state++;return {...receipt,status:'RUNNING'};};
   const client=await clientFor(t,f.gateway);
-  const response=await client.callTool({name:'bridge.run',arguments:{mode:'direct',argv:['sleep','20'],waitSeconds:1}});
+  const response=await client.callTool({name:'bridge.run_host_command',arguments:{hostId:'host-a',argv:['sleep','20'],waitSeconds:1}});
   assert.equal(response.isError,undefined);assert.equal(response.structuredContent.runId,receipt.runId);
   assert.equal(response.structuredContent.status,'RUNNING');assert.ok(f.calls.state>=1&&f.calls.state<=2);
   const later=await client.callTool({name:'bridge.get_result',arguments:{runId:receipt.runId}});
@@ -66,7 +65,7 @@ test('invalid or non-Direct waits reject before any execution side effect',async
     {mode:'direct',waitSeconds:11},{mode:'direct',waitSeconds:-1},{mode:'direct',waitSeconds:0.5},
     {mode:'host',host:'host-a',enabled:false,waitSeconds:1},{mode:'asset',waitSeconds:0}
   ]) {
-    const response=await client.callTool({name:'bridge.run',arguments:args});
+    const response=await client.callTool({name:'bridge.run_host_command',arguments:{hostId:'host-a',argv:['whoami'],...args}});
     assert.equal(response.isError,true);
   }
   assert.equal(f.calls.submit,0);
@@ -76,7 +75,7 @@ test('waited file exports return metadata; links remain an explicit get_result r
   f.gateway.getResult=async()=>({...result,exports:[exported]});
   let links=0;f.gateway.issueAssetResource=async()=>{links++;return {uri:'bridge-file:///access/test-token'};};
   const client=await clientFor(t,f.gateway);
-  const response=await client.callTool({name:'bridge.run',arguments:{mode:'direct',argv:['whoami'],waitSeconds:10}});
+  const response=await client.callTool({name:'bridge.run_host_command',arguments:{hostId:'host-a',argv:['whoami'],waitSeconds:10}});
   assert.equal(response.isError,undefined);assert.equal(response.structuredContent.exports[0].assetId,exported.assetId);
   assert.equal(response.content.some(item=>item.type==='resource_link'),false);assert.equal(links,0);
   const explicit=await client.callTool({name:'bridge.get_result',arguments:{runId:receipt.runId}});

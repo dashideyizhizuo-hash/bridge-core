@@ -930,14 +930,7 @@ test('OAuth-protected MCP path exposes execution tools plus bounded task transit
   const listed=await client.listTools();
   assert.deepEqual(
     listed.tools.map(tool=>tool.name),
-    [
-      'bridge.discover',
-      'bridge.run',
-      'bridge.get_run',
-      'bridge.get_result',
-      'bridge.publish',
-      'bridge.task_transition'
-    ]
+    ["bridge.list_hosts","bridge.create_host_pairing","bridge.pause_host","bridge.resume_host","bridge.run_host_command","bridge.import_file","bridge.create_file_upload","bridge.delete_file","bridge.get_repository_configuration","bridge.execute_repository_commands","bridge.verify_repository","bridge.edit_and_verify_repository","bridge.get_run","bridge.get_result","bridge.publish","bridge.task_transition","bridge.repository_tools_status"]
   );
   const publish=listed.tools.find(tool=>tool.name==='bridge.publish');
   assert.deepEqual(
@@ -1043,14 +1036,7 @@ test('OAuth-protected MCP task session wires owner-bound lease validation and ta
   const listed=await client.listTools();
   assert.deepEqual(
     listed.tools.map(tool=>tool.name),
-    [
-      'bridge.discover',
-      'bridge.run',
-      'bridge.get_run',
-      'bridge.get_result',
-      'bridge.publish',
-      'bridge.task_transition'
-    ]
+    ["bridge.list_hosts","bridge.create_host_pairing","bridge.pause_host","bridge.resume_host","bridge.run_host_command","bridge.import_file","bridge.create_file_upload","bridge.delete_file","bridge.get_repository_configuration","bridge.execute_repository_commands","bridge.verify_repository","bridge.edit_and_verify_repository","bridge.get_run","bridge.get_result","bridge.publish","bridge.task_transition","bridge.repository_tools_status"]
   );
   assert.ok(gateways.length>=1);
   const scoped=gateways.at(-1);
@@ -1087,7 +1073,7 @@ test('OAuth-protected MCP task session wires owner-bound lease validation and ta
     ['getTask','assertCurrent','completeStage']
   );
 
-  const run=listed.tools.find(tool=>tool.name==='bridge.run');
+  const run=listed.tools.find(tool=>tool.name==='bridge.edit_and_verify_repository');
   assert.equal(Object.hasOwn(run.inputSchema.properties,'task'),false);
   const publish=listed.tools.find(tool=>tool.name==='bridge.publish');
   assert.deepEqual(Object.keys(publish.inputSchema.properties),['runId','taskSessionToken']);

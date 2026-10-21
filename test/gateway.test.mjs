@@ -252,12 +252,10 @@ test('task activity renews only after a successful operation bound to the curren
 });
 
 test('MCP public surface adds one bounded task transition beside non-redirectable publish',()=>{
-  assert.deepEqual(MCP_TOOL_DEFINITIONS.map(x=>x.name),[
-    'bridge.discover','bridge.run','bridge.get_run','bridge.get_result','bridge.publish','bridge.task_transition'
-  ]);
-  const run=MCP_TOOL_DEFINITIONS.find(x=>x.name==='bridge.run');
-  assert.ok(run.inputSchema.properties.mode.enum.includes('batch'));
-  assert.equal(run.inputSchema.properties.steps.maxItems,16);
+  assert.deepEqual(MCP_TOOL_DEFINITIONS.map(x=>x.name),["bridge.list_hosts","bridge.create_host_pairing","bridge.pause_host","bridge.resume_host","bridge.run_host_command","bridge.import_file","bridge.create_file_upload","bridge.delete_file","bridge.get_repository_configuration","bridge.execute_repository_commands","bridge.verify_repository","bridge.edit_and_verify_repository","bridge.get_run","bridge.get_result","bridge.publish","bridge.task_transition","bridge.repository_tools_status"]);
+  const run=MCP_TOOL_DEFINITIONS.find(x=>x.name==='bridge.execute_repository_commands');
+  assert.equal(Object.hasOwn(run.inputSchema.properties,'mode'),false);
+  assert.equal(run.inputSchema.properties.commands.maxItems,16);
   const publish=MCP_TOOL_DEFINITIONS.find(x=>x.name==='bridge.publish');
   assert.deepEqual(Object.keys(publish.inputSchema.properties),['runId','taskSessionToken']);
 });

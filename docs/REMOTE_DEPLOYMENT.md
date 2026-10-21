@@ -19,7 +19,9 @@ GitHub remains durable engineering truth for repository-backed work. D1 is the d
 
 ## 1. End-user experience
 
-Bridge is operated as a service. Cloudflare, D1, R2, the GitHub App, service secrets and production deployment are operator concerns, never customer-host setup.
+Your Bridge deployment runs as a service. Cloudflare, D1, R2, the GitHub App,
+service secrets and deployment are its operator's concerns, separate from
+connecting an end-user Host.
 
 The connector flow is intentionally minimal:
 
@@ -245,7 +247,7 @@ Only a SHA-256 digest plus the minimum task/worker/epoch mapping is persisted in
 Cloud-hosted workers pass this opaque capability through the task-aware MCP tool arguments:
 
 ```text
-bridge.run(..., taskSessionToken)
+bridge.execute_repository_commands(..., taskSessionToken) / bridge.edit_and_verify_repository(..., taskSessionToken)
 bridge.get_run(runId, taskSessionToken)
 bridge.get_result(runId, taskSessionToken)
 bridge.publish(runId, taskSessionToken)
@@ -436,15 +438,15 @@ The host client:
 
 The signed pairing capability carries the authenticated Bridge principal, reserved host ID, issuance/expiry and nonce. It is stateless and does not add a D1 migration. A replay after successful enrollment cannot rotate the already-created host because self-service registration is create-only.
 
-After connection, the user can inspect Direct hosts with repository-free `bridge.discover()` and can enable/disable an owned host through:
+After connection, inspect owned Hosts with `bridge.list_hosts()`. Pause the
+chosen Host through:
 
-```json
-{
-  "mode": "host",
-  "host": "<host-id>",
-  "enabled": false
-}
+```text
+bridge.pause_host(hostId=<returned owned host ID>)
 ```
+
+Use `bridge.resume_host` for an explicitly authorized resume. These are separate
+operations, not a mode or enablement parameter on a generic executor.
 
 Disabling the host reuses the existing Direct kill-switch semantics and cancels queued/running work.
 
@@ -468,7 +470,7 @@ which produces the allowlisted `@dashideyizhizuo/bridge-host` client, including 
 
 After the existing Direct Asset service is deployed:
 
-1. call `bridge.run(mode="asset", fileName, mimeType, sizeBytes, sha256)`;
+1. call `bridge.create_file_upload(fileName, mimeType, sizeBytes, sha256)`;
 2. PUT the exact raw bytes to the returned one-time upload URL;
 3. verify `bridge.get_result(da1:...)` reports `READY`;
 4. submit a Direct Run with `assets:[assetId]` and exact `{asset:0}` argv;
@@ -497,13 +499,14 @@ A deployed Bridge control plane should be considered operational only when all a
 4. `GET /healthz` and `GET /readyz` succeed;
 5. unauthenticated `/mcp` returns the expected OAuth challenge rather than executing a tool;
 6. GitHub App user/install/repository proof succeeds for an authorized repository;
-7. the connected MCP client sees exactly the six Bridge tools;
+7. the connected MCP client sees the explicit fixed tool registry and only fully
+   declared permitted preset tools; repository_tools_status reports catalog faults;
 8. an authenticated `discover -> run -> get_run/get_result` flow succeeds through GitHubTransport;
 9. a VERIFIED edit candidate can be published only when repository grant + project publication policy + stale-base/fencing checks all pass;
 10. reconnect/onboarding does not downgrade repository grants;
 11. Dashboard-managed non-secret Worker variables survive code deployment;
 12. no credential, installation token or physical host-resource path is exposed in normal results/errors;
-13. if Direct Exec is enabled, one registered host can complete a real `bridge.run(mode="direct") -> get_run/get_result` flow without a repository;
+13. if Direct Exec is enabled, one registered host can complete a real `bridge.run_host_command -> get_run/get_result` flow without a repository;
 14. a Direct Exec run cannot be passed to `bridge.publish` and runner-token mismatch/stale completion fail closed.
 
 Durable Task Runtime acceptance additionally requires current-epoch activation, active READY/BLOCKED/DONE transition, expiry-only GitHub reconciliation, crash/takeover recovery and stale-worker rejection.

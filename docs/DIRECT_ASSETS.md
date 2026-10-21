@@ -4,9 +4,8 @@ Bridge uses one private R2-backed file plane for bounded files that cross the
 MCP/Direct boundary. D1 stores only ownership, identity, lifecycle and integrity
 metadata; file bytes stay in private R2.
 
-The canonical agent path is MCP-native. The older upload-ticket protocol remains
-available for programmable compatibility clients that deliberately control raw
-HTTP.
+The canonical agent path is MCP-native. Programmable byte-upload clients use the
+separate `bridge.create_file_upload` ticket operation and protected raw HTTP flow.
 
 ## Canonical ChatGPT / agent flow
 
@@ -14,19 +13,19 @@ HTTP.
 
 ```text
 ChatGPT generated/attached file
-  -> bridge.run(mode="asset", file=<ChatGPT file param>)
+  -> bridge.import_file(file=<ChatGPT file param>)
   -> Bridge fetches the plugin-authorized temporary file URL server-side
   -> exact size + SHA-256
   -> durable WAITING_UPLOAD metadata keyed by source identity
   -> private R2
   -> atomic READY temporary assetId + expiresAt
-  -> bridge.run(mode="direct", assets=[assetId], argv=[..., "{asset:0}"])
+  -> bridge.run_host_command(hostId=<returned hostId>, assets=[assetId], argv=[..., "{asset:0}"])
   -> runner-authenticated private download
   -> host re-verifies size + SHA-256
   -> exact {asset:N} argv substitution
 ```
 
-`bridge.run` declares its top-level `file` input through
+`bridge.import_file` declares its top-level `file` input through
 `_meta["openai/fileParams"]`. ChatGPT supplies:
 
 ```json
@@ -51,7 +50,7 @@ reuses the same object identity, while an interrupted write remains a bounded
 `WAITING_UPLOAD` record that scheduled cleanup can remove instead of leaving an
 untracked R2 object.
 
-`bridge.run` returns the READY metadata receipt without a file resource link.
+`bridge.import_file` returns the READY metadata receipt without a file resource link.
 Use its `assetId` directly for host input. To read or materialize the stored file,
 call `bridge.get_result` with the receipt's `runId`; only that result operation
 adds principal-bound resource links. `bridge.get_run` remains metadata-only.
@@ -64,7 +63,7 @@ A Direct Run may declare up to eight bounded output slots:
 
 ```json
 {
-  "mode": "direct",
+  "hostId": "<returned owned host ID>",
   "argv": ["renderer", "--output", "{export:0}"],
   "exports": [
     {
@@ -142,24 +141,26 @@ lifetime. A repeated import of the same existing legacy source may reuse that
 original object. Changing or deleting legacy permanent data needs separate owner
 authorization; this release does not turn it into temporary data.
 
-## Low-level compatibility upload ticket
+## Programmable byte-upload ticket
 
-Programmable clients may still request:
+Programmable clients call `bridge.create_file_upload` with:
 
 ```json
 {
-  "mode": "asset",
   "fileName": "artwork.png",
   "mimeType": "image/png",
   "sizeBytes": 3145728,
-  "sha256": "<64 lowercase hex>",
-  "persistent": false
+  "sha256": "<64 lowercase hex>"
 }
 ```
 
-Bridge returns a one-time `WAITING_UPLOAD` ticket. Compatibility upload tickets are intentionally transient. `persistent=true` is rejected. This compatibility path preserves its original ticket deadline (one hour from ticket creation by default, or explicit `ttlSeconds` up to 24 hours). READY finalization does not reset that deadline. It differs from the canonical native import/export default of 24 hours after READY.
+Bridge returns a one-time `WAITING_UPLOAD` ticket. Upload tickets are temporary;
+the tool accepts no permanence override. The ticket deadline is one hour from
+creation by default, or explicit `ttlSeconds` up to 24 hours. READY finalization
+does not reset it. This differs from native import/export's default 24 hours
+after READY; use the actual returned expiry.
 
-The compatibility client
+The byte-upload client
 performs:
 
 ```text
@@ -185,7 +186,7 @@ A Direct Run can bind owned READY assets:
 
 ```json
 {
-  "mode": "direct",
+  "hostId": "<returned owned host ID>",
   "assets": ["asset-..."],
   "argv": ["tool", "--input", "{asset:0}"]
 }

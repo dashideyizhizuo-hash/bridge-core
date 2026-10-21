@@ -6,7 +6,7 @@ import {createBridgeMcpHandler} from '../src/mcp-server.mjs';
 const MAX_BODY=2*1024*1024,MAX_ELEMENTS=10_000;
 async function fixture(t,{owner='owner-a',gateway,handler}={}){
   const counts={calls:0};
-  const read=async()=>{counts.calls++;return {owner};};
+  const read=async()=>{counts.calls++;return {direct:{owner}};};
   const active=handler??createBridgeMcpHandler({gateway:gateway??{discover:read,run:read,getRun:read,getResult:read,publish:read}});
   const client=new Client({name:owner,version:'1'});
   t.after(async()=>{await client.close();if(!handler)await active.close();});
@@ -17,17 +17,20 @@ async function fixture(t,{owner='owner-a',gateway,handler}={}){
 test('MCP rejects excessive argument elements before reaching any gateway',async t=>{
   const f=await fixture(t);
   for(const parameters of [{items:Array(MAX_ELEMENTS+1).fill(0)},Object.fromEntries(Array.from({length:MAX_ELEMENTS+1},(_,i)=>['k'+i,0]))]){
-    const result=await f.client.callTool({name:'bridge.run',arguments:{mode:'capability',parameters}});
+    const result=await f.client.callTool({name:'bridge.run_host_command',arguments:{hostId:'host-a',argv:['whoami'],...parameters}});
     assert.equal(result.isError,true);assert.equal(f.counts.calls,0);
   }
-  const ordinary=await f.client.callTool({name:'bridge.discover',arguments:{}});
+  const ordinary=await f.client.callTool({name:'bridge.list_hosts',arguments:{}});
   assert.notEqual(ordinary.isError,true);assert.equal(f.counts.calls,1);
 });
 
 test('MCP accepts the advertised maximum ASCII argv and a large bounded parameter value',async t=>{
   const f=await fixture(t);
-  for(const arguments_ of [{mode:'direct',waitSeconds:0,argv:Array(64).fill('x'.repeat(8192))},{mode:'capability',parameters:{value:'中'.repeat(300_000)}}]){
-    const result=await f.client.callTool({name:'bridge.run',arguments:arguments_});
+  for(const [name,arguments_] of [
+    ['bridge.run_host_command',{hostId:'host-a',waitSeconds:0,argv:Array(64).fill('x'.repeat(8192))}],
+    ['bridge.edit_and_verify_repository',{repository:'owner/project',targetRef:'agent/test',expectedPolicySha:'a'.repeat(40),operations:[{type:'apply-patch',patch:'中'.repeat(300_000)}],commitSubject:'test: request admission'}]
+  ]){
+    const result=await f.client.callTool({name,arguments:arguments_});
     assert.notEqual(result.isError,true);
   }
   assert.equal(f.counts.calls,2);
@@ -48,11 +51,11 @@ test('MCP declared and chunked HTTP bodies above two MiB are denied before JSON 
 test('concurrent clients with colliding JSON-RPC IDs retain independent gateway identities',async t=>{
   let calls=0,release;const gate=new Promise(resolve=>{release=resolve;});
   const handler=createBridgeMcpHandler({gatewayForRequest:({authInfo})=>{
-    const read=async()=>{if(++calls===2)release();await gate;return {owner:authInfo.clientId};};
+    const read=async()=>{if(++calls===2)release();await gate;return {direct:{owner:authInfo.clientId}};};
     return {discover:read,run:read,getRun:read,getResult:read,publish:read};
   }});
   t.after(()=>handler.close());
   const [a,b]=await Promise.all([fixture(t,{owner:'principal-a',handler}),fixture(t,{owner:'principal-b',handler})]);
-  const [ar,br]=await Promise.all([a.client.callTool({name:'bridge.discover',arguments:{}}),b.client.callTool({name:'bridge.discover',arguments:{}})]);
-  assert.equal(ar.structuredContent.owner,'principal-a');assert.equal(br.structuredContent.owner,'principal-b');
+  const [ar,br]=await Promise.all([a.client.callTool({name:'bridge.list_hosts',arguments:{}}),b.client.callTool({name:'bridge.list_hosts',arguments:{}})]);
+  assert.equal(ar.structuredContent.direct.owner,'principal-a');assert.equal(br.structuredContent.direct.owner,'principal-b');
 });

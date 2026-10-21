@@ -18,7 +18,7 @@ When a user names a GitHub repository and asks to start or continue a long-runni
 1. Read repository `AGENTS.md`, delegated/long-running guidance, the plan entrypoint and directly relevant canonical architecture. Verify current `main`, open Issues, candidate canonical branches, PRs, CI and exact checkpoints before relying on prompt history.
 2. Reuse the matching durable task and canonical branch when they exist; never create a duplicate Issue or replacement branch merely because the conversation is new.
 3. For a genuinely new authorized objective, establish one primary GitHub Issue containing scope, non-goals, bounded stage chain, transition criteria, independent gates and hard stops; bind one canonical branch and exact starting SHA. Stop for a product/authority decision, not routine setup.
-4. Confirm the Bridge package exposes its six tools and the repository is authorized. From an operator-capable Supervisor environment, enroll the task once when Runtime state does not already exist; ordinary Workers never self-enroll or bypass missing authority.
+4. Confirm the connected server exposes the explicit repository configuration, command, verification/edit, evidence, publication and task-transition tools, and the repository is authorized. From an operator-capable Supervisor environment, enroll the task once when Runtime state does not already exist; ordinary Workers never self-enroll or bypass missing authority.
 5. Start or recover the recurring Supervisor loop below. Completion means Runtime `inspect` identifies the durable task, branch and checkpoint, and either an existing valid Worker lease is healthy or exactly one Chat Worker has been launched through the current web path.
 
 ## Core rules
@@ -49,7 +49,7 @@ When a Supervisor manages ordinary ChatGPT chats, whether pre-created or provisi
 - Use standby carriers only for a durable takeover or declared independent review gate. A reviewer remains read-only without the exclusive mutation lease. At a review boundary, let the author release or expire before activating the reviewer; never overlap them.
 - Ordinary Chat launch uses only repository-local `bridge-chat` over the existing browser session. Do not use Codex cross-thread messaging, invent another launcher, or put activation material in ordinary output.
 - Begin bootstrap and activation prompts with: `Complete this task in the current ordinary Chat mode. Do not request or attempt a switch to Work or Codex mode.` Point the Worker to the GitHub copies of both Bridge Skills, the target Issue/governance entrypoints and the canonical checkpoint. Missing Chat-mode tools become a durable blocker, not permission to switch modes.
-- Launch a fresh disposable carrier and deliver a dispatch through the single deep command `node bin/bridge-chat.mjs launch --task <task> --dispatch <dispatch> --prompt <recovery-pointers> --json`. It first asks the Chat to complete a harmless `bridge.discover` call and waits for a nonce-bound response; missing, failed, or ambiguous readiness fails before activation. This is an availability screen, not authority evidence—Bridge fencing remains authoritative. Do not routinely reuse a carrier after its Worker turn ends.
+- Launch a fresh disposable carrier and deliver a dispatch through the single deep command `node bin/bridge-chat.mjs launch --task <task> --dispatch <dispatch> --prompt <recovery-pointers> --json`. It first asks the Chat to complete a harmless `bridge.get_repository_configuration` call for the target repository and waits for a nonce-bound response; missing, failed, or ambiguous readiness fails before activation. This is an availability screen, not authority evidence—Bridge fencing remains authoritative. Do not routinely reuse a carrier after its Worker turn ends.
 - Wait for `bridge-chat launch` to reach a terminal process result. If the command runner yields a session ID, retain it and wait for completion. Runtime `RECOVERING` proves only that the dispatch was consumed; successful web delivery requires terminal `launched` for the expected conversation identity. If activation was consumed but delivery failed, wait for lease expiry; never reuse the dispatch or token. Keep `create`, `send`, and `activate` for bounded diagnostics and explicit continuation, not the normal Supervisor path.
 - Before calling the loop operational, verify enrollment, canonical checkpoint, heartbeat launch route and secure web delivery. Single-writer safety also requires the canonical branch to have no unfenced direct-write path.
 
@@ -65,7 +65,7 @@ activate / claim
 -> inspect intervening commits/files
 -> read repository governance
 -> confirm one bounded stage
--> Bridge batch Run
+-> explicit repository command or edit-and-verify tool
 -> focused evidence
 -> publish if VERIFIED
 -> revalidate current lease
@@ -81,7 +81,7 @@ A recovery result showing valid linear work after the checkpoint is not permissi
 
 For cloud-hosted MCP workers:
 
-- pass the activation-issued `taskSessionToken` to task-aware `bridge.run`, `bridge.get_run`, `bridge.get_result`, `bridge.publish` and `bridge.task_transition`; successful task-bound operations slide the current lease and token expiry together without changing the fencing epoch. Poll long Runs and retrieve terminal evidence with the token rather than allowing it to expire between execution and checkpointing;
+- pass the activation-issued `taskSessionToken` to task-aware `bridge.get_repository_configuration`, `bridge.execute_repository_commands`, `bridge.verify_repository`, `bridge.edit_and_verify_repository`, `bridge.get_run`, `bridge.get_result`, `bridge.publish` and `bridge.task_transition`; successful task-bound operations slide the current lease and token expiry together without changing the fencing epoch. Use the fixed trusted `mcp.verification` recipe; caller-selected capability IDs, arbitrary parameters and mixed execution steps are not tool inputs. Poll long Runs and retrieve terminal evidence with the token rather than allowing it to expire between execution and checkpointing;
 - record READY or DONE in the machine checkpoint payload so expiry reconciliation can recover a comment written just before an interrupted Issue-pointer update; legacy status-less comments remain recoverable by a replacement Worker but are not auto-adopted by the Watchdog;
 - for BLOCKED, persist the blocker journal comment and its exact reason/comment pointer in managed Issue state before calling the transition tool;
 - machine checkpoint/blocker comments must be written by the verified GitHub identity bound to the enrolled Bridge principal; another commenter's copied marker is not recoverable authority;
