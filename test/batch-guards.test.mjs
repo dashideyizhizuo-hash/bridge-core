@@ -10,6 +10,7 @@ import { EventEmitter } from 'node:events';
 import { syncBuiltinESMExports } from 'node:module';
 import { performance } from 'node:perf_hooks';
 import { executeRequest } from '../src/runtime.mjs';
+import { runBounded } from '../src/execute.mjs';
 import { BATCH_LIMITS } from '../src/validate.mjs';
 
 const repository = 'example/project';
@@ -229,12 +230,84 @@ test('POSIX background child cannot continue mutating a later step', { skip: pro
   assert.equal(result.steps[1].evidence.stdout, 'false');
 });
 
-test('POSIX output overflow escalates even when target ignores SIGTERM', { skip: process.platform === 'win32' }, async t => {
+test('POSIX output overflow escalates at exactly two seconds after SIGTERM', { skip: process.platform === 'win32' }, async t => {
+  // Observe the real executor at its OS boundary. Git and hosted-runner load
+  // must not turn the escalation deadline into a whole-Run wall-clock guess.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let now = 0, closed = false, settled = false;
+  const signals = [];
+  const child = new EventEmitter();
+  child.pid = 987654321;
+  child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
+  const finish = signal => {
+    if (closed) return;
+    closed = true;
+    child.emit('close', null, signal);
+  };
+  const killMock = t.mock.method(process, 'kill', (pid, signal) => {
+    assert.equal(pid, -child.pid, 'stop only the spawned POSIX process group');
+    if (closed) throw Object.assign(new Error('fixture already exited'), { code: 'ESRCH' });
+    signals.push({ signal, at: now });
+    // The target ignores SIGTERM and exits only after the hard stop.
+    if (signal === 'SIGKILL') queueMicrotask(() => finish(signal));
+    return true;
+  });
+  const spawnMock = t.mock.method(childProcess, 'spawn', (file, args, options) => {
+    assert.equal(file, process.execPath);
+    assert.deepEqual(args, ['-e', 'fixture-target']);
+    assert.equal(options.detached, true);
+    return child;
+  });
+  t.mock.method(performance, 'now', () => now);
+  syncBuiltinESMExports();
+  t.after(() => {
+    spawnMock.mock.restore(); killMock.mock.restore();
+    syncBuiltinESMExports();
+  });
+  // Attach the rejection handler before producing output, including in mutants.
+  const running = runBounded({ cwd: '.', argv: [process.execPath, '-e', 'fixture-target'],
+    env: {}, timeoutSeconds: 30, stdoutBytes: 4096, stderrBytes: 4096 })
+    .then(value => ({ value }), error => ({ error }))
+    .then(outcome => { settled = true; return outcome; });
+  try {
+    child.stdout.emit('data', Buffer.alloc(5000, 'x'));
+    assert.deepEqual(signals, [{ signal: 'SIGTERM', at: 0 }]);
+    now = 1999; t.mock.timers.tick(1999);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(closed, false);
+    assert.equal(settled, false);
+    assert.deepEqual(signals, [{ signal: 'SIGTERM', at: 0 }], 'do not hard-kill before the grace period');
+    now = 2000; t.mock.timers.tick(1);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(signals, [{ signal: 'SIGTERM', at: 0 }, { signal: 'SIGKILL', at: 2000 }],
+      'an ignoring target must receive SIGKILL at the two-second deadline');
+    assert.equal(closed, true);
+    assert.equal(settled, true);
+    const { error } = await running;
+    assert.equal(error?.code, 'OUTPUT_LIMIT_EXCEEDED');
+    assert.equal(error.details.signal, 'SIGKILL');
+    assert.equal(error.details.stdoutBytes, 4096);
+    assert.equal(error.details.stdout, 'x'.repeat(4096));
+    assert.equal(error.details.durationMs, 2000);
+  } finally {
+    finish('TEST_CLEANUP');
+    await running;
+  }
+});
+
+test('POSIX output overflow hard-kills an ignoring target and never runs the suffix', { skip: process.platform === 'win32' }, async t => {
   const s = fixture(t);
-  const result = await s.run([exec('overflow', "process.on('SIGTERM',()=>{}); process.stdout.write('x'.repeat(5000)); setInterval(()=>{},1000)"), mark()]);
+  // Bound a broken executor too: without escalation the child exits itself,
+  // producing exitCode 97 rather than SIGKILL, so this test fails without hanging.
+  const target = "process.on('SIGTERM',()=>{}); setTimeout(()=>process.exit(97),8000); process.stdout.write('x'.repeat(5000)); setInterval(()=>{},1000)";
+  const result = await s.run([exec('overflow', target), mark()]);
   assert.equal(result.error.code, 'OUTPUT_LIMIT_EXCEEDED');
   assert.deepEqual(states(result), ['FAILED', 'SKIPPED']);
-  assert.ok(result.durationMs < 5000, result.durationMs);
+  assert.equal(result.steps[0].execution.signal, 'SIGKILL');
+  assert.equal(result.steps[0].execution.stdoutBytes, 4096);
+  assert.equal(Buffer.byteLength(result.steps[0].evidence.stdout), 4096);
+  assert.equal(result.steps[1].durationMs, 0);
+  assert.equal(existsSync(join(s.repo, 'marker')), false);
 });
 
 test('large failed output retains the complete ordered receipt and bounded partial evidence', async t => {
