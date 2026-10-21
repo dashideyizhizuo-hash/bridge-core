@@ -7,6 +7,24 @@ Bridge keeps one stable public MCP surface while supporting two compatible inter
 
 The six public MCP tool names are independent of those internal request shapes. `bridge.task_transition` is the only task-lifecycle tool; it does not add execution authority.
 
+## MCP request budgets
+
+HTTP MCP JSON-RPC request bodies are limited to **2 MiB**, including the envelope
+and JSON escaping. Declared and streamed lengths are checked before JSON parsing;
+oversized or inconsistent lengths receive HTTP413 and the source is canceled.
+Tool arguments are additionally limited to **10,000 total array elements and
+object keys** before schema validation. Oversized argument structures return a
+tool error without reaching a gateway. Authentication and project/host policy
+checks still apply to requests within these budgets.
+
+These are transport/admission limits, separate from the smaller limits on Direct
+argv, batch requests and trusted editing policy. A custom project may allow a
+4MiB edit or a long capability string, but that does not raise the HTTP limit;
+split large work into independently valid requests. Binary file payloads use the
+bounded asset transfer endpoints, not a JSON-RPC body. Keep a fresh Server per
+request and exact resource/audience validation; do not supply an unchecked
+`parsedBody` to bypass the SDK's byte guard.
+
 ## 1. Request lifecycle
 
 Statuses:
