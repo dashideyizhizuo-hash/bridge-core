@@ -3,6 +3,7 @@ import { Buffer } from 'node:buffer';
 import { assertBridge, errorEnvelope } from './errors.mjs';
 import { MCP_TOOL_DEFINITIONS } from './mcp-tools.mjs';
 import { directWaitSeconds, waitForDirectResult } from './direct-run-wait.mjs';
+import {readBoundedBody} from './cloudflare/request-body.mjs';
 
 const TOOL_METHODS = Object.freeze({
   'bridge.discover': 'discover',
@@ -157,7 +158,7 @@ export function createBridgeMcpHandler({
     const server = new McpServer({
       name: 'runner-bridge',
       version: '0.3.0'
-    });
+    },{maxToolInputElements:10_000});
 
     server.registerResource(
       'bridge-private-file',
@@ -225,10 +226,21 @@ export function createBridgeMcpHandler({
     }
 
     return server;
-  });
+  },{maxRequestBodySize:2*1024*1024});
   return {
     async close(){await Promise.all([...handlers].map(handler=>handler.close()));},
     async fetch(request,...args) {
+      // Bound and cancel the original source before SDK request classification
+      // can clone/tee it. File payload bytes use the separate asset endpoints.
+      if(request.method==='POST'&&request.body){
+        let bytes;
+        try {bytes=await readBoundedBody(request,{maxBytes:2*1024*1024,code:'MCP_REQUEST_TOO_LARGE',signal:request.signal});}
+        catch(error){
+          if(error?.code!=='MCP_REQUEST_TOO_LARGE')throw error;
+          return Response.json({jsonrpc:'2.0',id:null,error:{code:-32600,message:'MCP request body exceeds the 2 MiB limit or has an invalid length'}},{status:413,headers:{'cache-control':'no-store'}});
+        }
+        request=new Request(request,{body:bytes});
+      }
       const holds=new Set(),cancellation=new AbortController();let reader,finished=false,streamController,ready,ending;
       const responseReady=new Promise(resolve=>{ready=resolve;});
       const finish=()=>{
