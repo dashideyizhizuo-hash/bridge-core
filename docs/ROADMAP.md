@@ -15,7 +15,7 @@ Current architecture and security contracts are defined by:
 
 Bridge currently has:
 
-- one stable six-tool MCP surface (five execution/evidence tools plus one fenced durable-task transition);
+- an explicit user-goal MCP surface with separately declared schemas, evidence retrieval and fenced task transition;
 - Cloudflare OAuth + official GitHub App production composition;
 - principal-scoped repository read/run/publish authority;
 - one canonical GitHub-backed execution transport;

@@ -5,13 +5,22 @@ import { resolve } from 'node:path';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { BridgeGateway } from '../src/gateway.mjs';
 import { createBridgeMcpHandler } from '../src/mcp-server.mjs';
+import {isRepositoryTool} from '../src/mcp-repository-catalog.mjs';
 
 const BASE='a'.repeat(40);
 const TARGET='b'.repeat(40);
 const CANDIDATE='c'.repeat(40);
 
 function fixturePolicy(){
-  return JSON.parse(readFileSync(resolve('test/fixtures/project/.bridge/project.json'),'utf8'));
+  const policy=JSON.parse(readFileSync(resolve('test/fixtures/project/.bridge/project.json'),'utf8'));
+  policy.mcp={verification:[{capability:'verify-clean',parameters:{}}]};
+  return policy;
+}
+
+async function presetName(client){
+  const tool=(await client.listTools()).tools.find(item=>item.title==='Observe: inspect-data');
+  assert.ok(tool,'trusted inspect-data preset must be advertised before invocation');
+  return tool.name;
 }
 
 function toolPayload(result){
@@ -29,6 +38,7 @@ class FakeTransport {
     this.counter=0;
     this.publishCalls=0;
   }
+  async listRepositories(){return ['example/project'];}
   async resolveRepository(repository){
     return {repository,defaultRef:'main',defaultSha:BASE};
   }
@@ -117,24 +127,48 @@ test('Streamable HTTP MCP lists execution tools plus bounded task transition',as
   const client=await connectInProcess(t,handler,authInfo);
 
   const listed=await client.listTools();
-  assert.deepEqual(listed.tools.map(tool=>tool.name),[
-    'bridge.discover',
-    'bridge.run',
+  assert.deepEqual(listed.tools.filter(tool=>!isRepositoryTool(tool.name)).map(tool=>tool.name),[
+    'bridge.list_hosts','bridge.create_host_pairing','bridge.pause_host','bridge.resume_host',
+    'bridge.run_host_command','bridge.import_file','bridge.create_file_upload','bridge.delete_file',
+    'bridge.get_repository_configuration','bridge.execute_repository_commands','bridge.verify_repository','bridge.edit_and_verify_repository',
     'bridge.get_run',
     'bridge.get_result',
     'bridge.publish',
-    'bridge.task_transition'
+    'bridge.task_transition','bridge.repository_tools_status'
   ]);
+  // Assert the wire-visible contract, not just the source definitions.
+  const expectedHints={
+    'bridge.list_hosts':[true,false,false],
+    'bridge.create_host_pairing':[false,true,false],
+    'bridge.pause_host':[false,true,false],
+    'bridge.resume_host':[false,true,false],
+    'bridge.run_host_command':[false,true,true],
+    'bridge.import_file':[false,false,false],
+    'bridge.create_file_upload':[false,false,false],
+    'bridge.delete_file':[false,true,false],
+    'bridge.get_repository_configuration':[true,false,false],
+    'bridge.execute_repository_commands':[false,true,true],
+    'bridge.verify_repository':[false,true,true],
+    'bridge.edit_and_verify_repository':[false,true,true],
+    'bridge.get_run':[false,false,false],
+    'bridge.get_result':[false,false,false],
+    'bridge.publish':[false,true,true],
+    'bridge.task_transition':[false,true,true],
+    'bridge.repository_tools_status':[true,false,false],  };
+  for(const tool of listed.tools){
+    const [readOnlyHint,destructiveHint,openWorldHint]=isRepositoryTool(tool.name)?[false,true,true]:expectedHints[tool.name];
+    assert.deepEqual(tool.annotations,{readOnlyHint,destructiveHint,openWorldHint});
+  }
   const publish=listed.tools.find(tool=>tool.name==='bridge.publish');
   assert.deepEqual(Object.keys(publish.inputSchema.properties),['runId','taskSessionToken']);
-  const runTool=listed.tools.find(tool=>tool.name==='bridge.run');
+  const runTool=listed.tools.find(tool=>tool.name==='bridge.edit_and_verify_repository');
   assert.deepEqual(
     Object.keys(runTool.inputSchema.properties).filter(key=>key.startsWith('task')),
     ['taskSessionToken']
   );
 
   const discovered=toolPayload(await client.callTool({
-    name:'bridge.discover',
+    name:'bridge.get_repository_configuration',
     arguments:{repository:'example/project'}
   }));
   assert.deepEqual(discovered.policy,{ref:'main',sha:BASE});
@@ -144,19 +178,18 @@ test('Streamable HTTP MCP lists execution tools plus bounded task transition',as
   assert.ok(seenAuth.every(value=>value===authInfo));
 });
 
-test('MCP run/get_result preserves trusted identities and rejects policy injection',async t=>{
+test('named MCP preset/get_result preserves trusted identities and rejects policy injection',async t=>{
   const transport=new FakeTransport();
   const gateway=new BridgeGateway({transport});
   const handler=createBridgeMcpHandler({gateway});
   const client=await connectInProcess(t,handler);
+  const name=await presetName(client);
 
   const rejected=await client.callTool({
-    name:'bridge.run',
+    name,
     arguments:{
-      repository:'example/project',
       targetRef:'agent/test',
-      mode:'capability',
-      capability:'inspect-data',
+
       parameters:{dataset_id:'demo'},
       policy:{sha:'f'.repeat(40)}
     }
@@ -165,12 +198,10 @@ test('MCP run/get_result preserves trusted identities and rejects policy injecti
   assert.equal(transport.submitted.length,0);
 
   const started=toolPayload(await client.callTool({
-    name:'bridge.run',
+    name,
     arguments:{
-      repository:'example/project',
       targetRef:'agent/test',
-      mode:'capability',
-      capability:'inspect-data',
+
       parameters:{dataset_id:'demo'}
     }
   }));
@@ -199,18 +230,18 @@ test('MCP publish remains run-bound and cannot redirect the verified branch',asy
   const client=await connectInProcess(t,handler);
 
   const edit=toolPayload(await client.callTool({
-    name:'bridge.run',
+    name:'bridge.edit_and_verify_repository',
     arguments:{
       repository:'example/project',
       targetRef:'agent/test',
-      mode:'edit',
+      expectedPolicySha:BASE,
+
       operations:[{
         type:'replace-exact',
         path:'scripts/inspect.mjs',
         oldText:'x',
         newText:'y'
       }],
-      verification:[{capability:'verify-clean',parameters:{}}],
       commitSubject:'fix: MCP verified edit'
     }
   }));
@@ -249,14 +280,13 @@ test('opaque taskSessionToken selects a task-aware gateway and is not forwarded 
     }
   });
   const client=await connectInProcess(t,handler);
+  const name=await presetName(client);
 
   const started=toolPayload(await client.callTool({
-    name:'bridge.run',
+    name,
     arguments:{
-      repository:'example/project',
       targetRef:'agent/test',
-      mode:'capability',
-      capability:'inspect-data',
+
       parameters:{dataset_id:'demo'},
       taskSessionToken:token
     }
@@ -264,7 +294,7 @@ test('opaque taskSessionToken selects a task-aware gateway and is not forwarded 
 
   assert.equal(typeof started.runId,'string');
   assert.equal(resolutions.length,1);
-  assert.equal(resolutions[0].toolName,'bridge.run');
+  assert.equal(resolutions[0].toolName,name);
   assert.equal(resolutions[0].taskSessionToken,token);
   assert.equal('taskSessionToken' in resolutions[0].args,false);
   assert.equal('taskSessionToken' in transport.submitted[0].request,false);
@@ -276,14 +306,13 @@ test('taskSessionToken fails closed when the deployment has no resolver',async t
   const handler=createBridgeMcpHandler({gateway});
   const client=await connectInProcess(t,handler);
   const token='bts_'+('B'.repeat(43));
+  const name=await presetName(client);
 
   const rejected=await client.callTool({
-    name:'bridge.run',
+    name,
     arguments:{
-      repository:'example/project',
       targetRef:'agent/test',
-      mode:'capability',
-      capability:'inspect-data',
+
       parameters:{dataset_id:'demo'},
       taskSessionToken:token
     }
@@ -409,21 +438,20 @@ test('MCP advertises ChatGPT fileParams and returns principal-bound file resourc
   const client=await connectInProcess(t,handler);
 
   const listed=await client.listTools();
-  const runTool=listed.tools.find(tool=>tool.name==='bridge.run');
+  const runTool=listed.tools.find(tool=>tool.name==='bridge.import_file');
   assert.deepEqual(runTool._meta?.['openai/fileParams'],['file']);
   assert.deepEqual(
-    runTool.inputSchema.$defs.OpenAIFile.required,
+    runTool.inputSchema.properties.file.required,
     ['download_url','file_id']
   );
   assert.deepEqual(
-    Object.keys(runTool.inputSchema.$defs.OpenAIFile.properties).sort(),
+    Object.keys(runTool.inputSchema.properties.file.properties).sort(),
     ['download_url','file_id','file_name','mime_type']
   );
 
   const called=await client.callTool({
-    name:'bridge.run',
+    name:'bridge.import_file',
     arguments:{
-      mode:'asset',
       file:{
         download_url:'https://files.oaiusercontent.com/private/file_123',
         file_id:'file_123',
@@ -472,9 +500,9 @@ test('Direct export resource links are issued only by get_result',async t=>{
     }
   };
   const client=await connectInProcess(t,createBridgeMcpHandler({gateway}));
-  for(const name of ['bridge.run','bridge.get_run']) {
-    const response=await client.callTool({name,arguments:name==='bridge.run'
-      ? {mode:'direct',argv:['fixture']} : {runId:receipt.runId}});
+  for(const name of ['bridge.run_host_command','bridge.get_run']) {
+    const response=await client.callTool({name,arguments:name==='bridge.run_host_command'
+      ? {hostId:'host-test',argv:['fixture'],waitSeconds:0} : {runId:receipt.runId}});
     assert.equal(response.isError,undefined);
     assert.deepEqual(response.structuredContent,receipt);
     assert.equal(response.content.some(item=>item.type==='resource_link'),false);

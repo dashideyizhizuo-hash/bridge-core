@@ -22,13 +22,26 @@ function permissionName(value) {
 }
 
 export class RepositoryAuthorizer {
-  constructor({ check }) {
+  constructor({ check, list }) {
     assertBridge(
       typeof check === 'function',
       'REPOSITORY_AUTHORIZATION_INVALID',
       'authorization check is required'
     );
+    assertBridge(list===undefined || typeof list==='function',
+      'REPOSITORY_AUTHORIZATION_INVALID','repository inventory hook must be a function');
     this.check = check;
+    this.list = list;
+  }
+
+  async listRepositories() {
+    if(this.list===undefined)return [];
+    const repositories=await this.list();
+    assertBridge(Array.isArray(repositories)&&repositories.length<=17,
+      'REPOSITORY_AUTHORIZATION_INVALID','repository inventory must contain at most 17 entries');
+    const names=[...new Set(repositories.map(repositoryName))].sort();
+    for(const repository of names)await this.assertRepository(repository,'read');
+    return names;
   }
 
   async assertRepository(repository, permission) {
@@ -51,6 +64,9 @@ export function createStaticRepositoryAuthorizer({ read = [], run = [], publish 
     publish: new Set(publish)
   };
   return new RepositoryAuthorizer({
-    check: ({ repository, permission }) => grants[permission].has(repository)
+    check: ({ repository, permission }) => grants[permission].has(repository),
+    // The extra entry is a sentinel: the catalog rejects all presets when
+    // more than sixteen repositories are configured, never a truncated subset.
+    list: () => [...grants.read].sort().slice(0,17)
   });
 }

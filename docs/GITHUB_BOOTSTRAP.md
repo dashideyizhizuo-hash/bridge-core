@@ -6,11 +6,19 @@ Use GitHub engineering bootstrap only when an Agent needs repository source muta
 
 ## Obtain the public CLI
 
-Host npm 0.4.2 does not include `bootstrap-project`; use the public core source
+Host npm 0.5.0 does not include `bootstrap-project`; use the public core source
 instead. Select an accepted immutable runtime SHA and a clean checkout of
 `https://github.com/dashideyizhizuo-hash/bridge-core`. No private operated-service
 source or published npm core package is required. Node.js 22+ is sufficient for
 this bootstrap CLI; its imports use Node built-in modules.
+
+The explicit-tool interface also requires the trusted default-branch policy's
+fixed `mcp.verification` recipe. It contains 1–4 reviewed entries such as
+`{capability:"verify",parameters:{}}`, each naming a declared `class:"verify"`
+capability and fixed parameter values. Inspect the actual generated policy and
+real verifier command; older bootstrap output missing this recipe is incomplete.
+The model cannot supply its own check list or install policy through a candidate.
+Source preparation does not prove the public runtime or Host 0.5.0 is published.
 
 The runtime repository and SHA must identify the same accessible source. A SHA
 from an unrelated/private checkout does not become a valid public action pin by
@@ -135,7 +143,7 @@ After generation, the returned next checklist still requires applicable external
 4. ensure an independent GitHub Actions self-hosted runner is online under the actual approved account with the required Linux/x64/class labels;
 5. validate the administrator-controlled host policy and resource isolation as that runner account;
 6. check the target repository's Actions/allowed-action settings for the selected public runtime pin; public core does not need private cross-repository action access;
-7. run `bridge.discover(repository)` and a separately authorized real acceptance flow: read-only execution, then VERIFIED edit and PUBLISHED receipt only when requested and permitted.
+7. run `bridge.get_repository_configuration(repository)` and a separately authorized real acceptance flow: read-only execution, then VERIFIED edit and PUBLISHED receipt only when requested and permitted.
 
 These are real authority boundaries, not boilerplate that should be hidden.
 

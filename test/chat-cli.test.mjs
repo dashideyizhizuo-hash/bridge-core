@@ -221,7 +221,7 @@ test('launch preflights a fresh Chat before consuming the dispatch',async()=>{
     runOpenCli:async(args,options)=>{
       calls.push({args,options});
       if(args.includes('--new')) {
-        assert.match(args[2],/bridge\.discover/);
+        assert.match(args[2],/bridge\.get_repository_configuration/);
         assert.match(args[2],/BRIDGEREADY\|abc12345/);
         return JSON.stringify([{
           conversationId:'conversation_1234',

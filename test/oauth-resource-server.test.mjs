@@ -230,20 +230,13 @@ test('verified OAuth principal reaches gatewayForRequest with bounded task trans
   const listed=await client.listTools();
   assert.deepEqual(
     listed.tools.map(tool=>tool.name),
-    [
-      'bridge.discover',
-      'bridge.run',
-      'bridge.get_run',
-      'bridge.get_result',
-      'bridge.publish',
-      'bridge.task_transition'
-    ]
+    ["bridge.list_hosts","bridge.create_host_pairing","bridge.pause_host","bridge.resume_host","bridge.run_host_command","bridge.import_file","bridge.create_file_upload","bridge.delete_file","bridge.get_repository_configuration","bridge.execute_repository_commands","bridge.verify_repository","bridge.edit_and_verify_repository","bridge.get_run","bridge.get_result","bridge.publish","bridge.task_transition","bridge.repository_tools_status"]
   );
   const publish=listed.tools.find(tool=>tool.name==='bridge.publish');
   assert.deepEqual(Object.keys(publish.inputSchema.properties),['runId','taskSessionToken']);
 
   const result=await client.callTool({
-    name:'bridge.discover',
+    name:'bridge.get_repository_configuration',
     arguments:{repository:'example/project'}
   });
   assert.equal(result.isError,undefined);

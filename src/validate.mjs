@@ -1,6 +1,7 @@
 import { isAbsolute } from 'node:path';
 import { assertBridge, BridgeError } from './errors.mjs';
 import { validateTaskBinding } from './task-runtime-binding.mjs';
+import { validateAndDefaultParameters } from './parameters.mjs';
 
 const CAPABILITY_CLASSES = new Set(['observe', 'verify']);
 const PARAM_TYPES = new Set(['string', 'integer', 'boolean']);
@@ -177,6 +178,24 @@ export function validateProjectPolicy(policy, repository) {
   for (const [id, capability] of Object.entries(policy.capabilities)) {
     assertBridge(/^[a-z][a-z0-9.-]{1,63}$/.test(id), 'PROJECT_POLICY_INVALID', `capability id invalid: ${id}`);
     validateCapability(capability, policy.runners, id);
+  }
+  if(policy.mcp!==undefined) {
+    const code='PROJECT_POLICY_INVALID';
+    assertBridge(isObject(policy.mcp),code,'mcp must be an object');
+    keysOnly(policy.mcp,new Set(['verification']),code,'mcp');
+    if(policy.mcp.verification!==undefined) {
+      assertBridge(Array.isArray(policy.mcp.verification)&&policy.mcp.verification.length>=1&&policy.mcp.verification.length<=4,
+        code,'mcp.verification must contain 1-4 fixed verify presets');
+      for(const step of policy.mcp.verification) {
+        assertBridge(isObject(step),code,'mcp verification step must be an object');
+        keysOnly(step,new Set(['capability','parameters']),code,'mcp verification step');
+        const capability=policy.capabilities[step.capability];
+        assertBridge(capability?.class==='verify'&&(step.parameters===undefined||isObject(step.parameters)),code,
+          'mcp verification must reference a declared verify preset with fixed parameters');
+        try {validateAndDefaultParameters(capability.parameters??{},step.parameters??{});}
+        catch {throw new BridgeError(code,'mcp verification parameters do not match the declared preset');}
+      }
+    }
   }
   if (policy.workspaceExec !== undefined) {
     assertBridge(isObject(policy.workspaceExec), 'PROJECT_POLICY_INVALID', 'workspaceExec must be object');

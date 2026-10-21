@@ -326,6 +326,16 @@ export class DirectAssetService {
     });
   }
 
+  async deletePersistent({principal,assetId}={}) {
+    assertBridge(this.bucket!==null,'DIRECT_ASSET_UNAVAILABLE','Direct Asset storage is unavailable');
+    assertBridge(typeof this.store.markDeletedOwned==='function','DIRECT_ASSET_UNAVAILABLE','persistent asset deletion is unavailable');
+    const asset=await this.store.getOwnedReady({principal,assetId});
+    assertBridge(asset.persistent===true,'DIRECT_ASSET_DENIED','only persistent assets can be deleted through this operation');
+    await this.bucket.delete(asset.objectKey);
+    const deleted=await this.store.markDeletedOwned({principal,assetId:asset.assetId});
+    return {...deleted,deleted:true};
+  }
+
   async assertReady({principal,assetIds}) {
     return this.store.assertReady({principal,assetIds});
   }

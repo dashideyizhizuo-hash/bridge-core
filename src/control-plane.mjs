@@ -157,6 +157,11 @@ export class RequestScopedGitHubTransport {
     });
   }
 
+  async listRepositories() {
+    if(typeof this.principalRepositoryAuthorizer.list!=='function')return [];
+    return this.principalRepositoryAuthorizer.list({principal:this.principal});
+  }
+
   async resolveRepository(repository) {
     return (await this.#transportFor(repository, 'read')).resolveRepository(repository);
   }

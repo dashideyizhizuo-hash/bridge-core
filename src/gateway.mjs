@@ -151,15 +151,27 @@ export class BridgeGateway {
       : createTaskBinding(this.taskContext,{repository,target});
   }
 
-  async #trustedContext(repository) {
+  async #trustedContext(repository,{signal}={}) {
+    signal?.throwIfAborted();
     const repo=repositoryName(repository);
     const info=await this.transport.resolveRepository(repo);
+    signal?.throwIfAborted();
     assertBridge(info && typeof info.defaultRef === 'string' && /^[0-9a-f]{40}$/.test(info.defaultSha), 'GATEWAY_TRANSPORT_INVALID', 'transport returned invalid repository identity');
     const policy=validateProjectPolicy(await this.transport.readProjectPolicy(repo,info.defaultSha),repo);
+    signal?.throwIfAborted();
     return { repository:repo, info, policy };
   }
 
-  async discover({ repository } = {}) {
+  async listRepositories() {
+    // Enumeration is an owner-scoped convenience, never an execution grant.
+    if(typeof this.transport.listRepositories!=='function')return [];
+    const repositories=await this.transport.listRepositories();
+    assertBridge(Array.isArray(repositories)&&repositories.length<=17&&repositories.every(value=>typeof value==='string'),
+      'MCP_CATALOG_UNAVAILABLE','Repository catalog is unavailable');
+    return [...new Set(repositories.map(repositoryName))].sort();
+  }
+
+  async discover({ repository,signal } = {}) {
     if(repository===undefined || repository===null) {
       assertBridge(
         this.directExec!==null && typeof this.directExec.listHosts==='function',
@@ -189,7 +201,7 @@ export class BridgeGateway {
         }
       };
     }
-    const {repository:repo,info,policy}=await this.#trustedContext(repository);
+    const {repository:repo,info,policy}=await this.#trustedContext(repository,{signal});
     const capabilities=Object.entries(policy.capabilities)
       .map(([id,capability])=>sanitizeCapability(id,capability,policy))
       .sort((a,b)=>a.id.localeCompare(b.id));
@@ -219,6 +231,7 @@ export class BridgeGateway {
       repository:repo,
       policy:{ref:info.defaultRef,sha:info.defaultSha},
       capabilities,
+      mcp:{verificationConfigured:Array.isArray(policy.mcp?.verification)},
       exec:genericExec,
       workspaceExec:workspace,
       editing
@@ -262,6 +275,21 @@ export class BridgeGateway {
       assertBridge(input.persistent!==true,'INVALID_GATEWAY_REQUEST',
         'New files are temporary transfers; persistent storage is not supported');
       const ttl=input.ttlSeconds===undefined ? {} : {ttlMs:input.ttlSeconds*1000};
+      if(input.assetAction!==undefined) {
+        assertBridge(
+          input.assetAction==='delete' &&
+            typeof input.assetId==='string' &&
+            Object.keys(input).every(key=>['mode','assetAction','assetId'].includes(key)),
+          'INVALID_GATEWAY_REQUEST',
+          'asset delete accepts only mode, assetAction=delete and assetId'
+        );
+        assertBridge(
+          typeof this.directAssets.deletePersistent==='function',
+          'DIRECT_ASSET_UNAVAILABLE',
+          'persistent asset deletion is unavailable'
+        );
+        return this.directAssets.deletePersistent({principal:this.principal,assetId:input.assetId});
+      }
       if(input.file!==undefined) {
         return this.directAssets.importFile({
           principal:this.principal,
@@ -336,6 +364,17 @@ export class BridgeGateway {
     }
 
     const {repository:repo,info,policy}=await this.#trustedContext(input?.repository);
+    if(input?.expectedPolicySha!==undefined)assertBridge(
+      input.expectedPolicySha===info.defaultSha,'POLICY_STALE',
+      'Trusted repository policy changed; refresh the tools and repository configuration before retrying');
+    if(input?.trustedVerification===true) {
+      assertBridge(['batch','edit'].includes(input.mode)&&Array.isArray(policy.mcp?.verification),
+        'VERIFICATION_DENIED','Trusted project policy must declare mcp.verification');
+      const verification=normalizeVerification(policy,policy.mcp.verification);
+      input=input.mode==='edit'
+        ? {...input,verification}
+        : {...input,steps:verification.map((step,index)=>({id:'verify-'+index,type:'preset',...step}))};
+    }
     const ref=targetRef(input?.targetRef);
     const target=await this.transport.resolveTarget(repo,{ref,sha:input?.targetSha});
     assertBridge(target && target.ref===ref && /^[0-9a-f]{40}$/.test(target.sha), 'GATEWAY_TRANSPORT_INVALID', 'transport returned invalid target identity');

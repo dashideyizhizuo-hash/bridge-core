@@ -155,7 +155,7 @@ test('trusted Gateway task context binds task key, epoch, canonical branch and e
   assert.deepEqual(transport.submitted[0].task,task(17));
   assert.equal(
     Object.hasOwn(
-      MCP_TOOL_DEFINITIONS.find(item=>item.name==='bridge.run').inputSchema.properties,
+      MCP_TOOL_DEFINITIONS.find(item=>item.name==='bridge.edit_and_verify_repository').inputSchema.properties,
       'task'
     ),
     false

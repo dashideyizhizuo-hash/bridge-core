@@ -5,7 +5,7 @@ Bridge keeps one stable public MCP surface while supporting two compatible inter
 - [Batch Run v1](BATCH_RUNS.md) is the canonical request/result contract for new execution: one Run, one shared exact-target workspace, ordered `exec` / `preset` / `edit` steps.
 - The capability/edit request described below remains the supported compatibility contract for existing callers and the legacy isolated edit workflow.
 
-The six public MCP tool names are independent of those internal request shapes. `bridge.task_transition` is the only task-lifecycle tool; it does not add execution authority.
+The explicit public MCP tools are independent of those internal request shapes; see [the tool contract](CHATGPT_PLUGIN.md). `bridge.task_transition` is the only task-lifecycle tool; it does not add execution authority.
 
 ## MCP request budgets
 

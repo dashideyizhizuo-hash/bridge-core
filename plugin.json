@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "runner-bridge",
-  "version": "0.3.1",
+  "version": "0.5.0",
   "description": "Connect user-owned hosts without Cloudflare credentials, run local tools/files directly, and use GitHub only for verified engineering workflows.",
   "author": {
     "name": "Bridge contributors"

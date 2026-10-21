@@ -68,29 +68,35 @@ GitHub remains durable engineering truth for repository-backed work. D1 stores c
 
 ## 4. Stable MCP surface
 
-The public tools remain:
+The explicit-tool release separates operations by user goal. See the complete
+registry and schemas in [the MCP contract](CHATGPT_PLUGIN.md). Principal flows are:
 
 ~~~text
-bridge.discover
-bridge.run
+bridge.list_hosts -> bridge.run_host_command
+bridge.import_file -> bridge.run_host_command
+bridge.get_repository_configuration
+  -> bridge.execute_repository_commands / bridge.verify_repository
+  / bridge.edit_and_verify_repository
 bridge.get_run
 bridge.get_result
 bridge.publish
 bridge.task_transition
 ~~~
 
-bridge.run selects the plane by mode.
+The selected tool determines the operation. Model callers do not supply a mode.
 
 A single-host Direct call can be as small as:
 
 ~~~json
 {
-  "mode": "direct",
+  "hostId": "<returned owned host ID>",
   "argv": ["node", "--version"]
 }
 ~~~
 
-GitHub modes retain repository and target semantics.
+Repository tools retain repository/target identity, an exact policy precondition
+and bounded submission semantics. Verification and editing use the fixed trusted
+`mcp.verification` recipe, not a caller-provided check list.
 
 bridge.get_run and bridge.get_result normalize both run types. bridge.publish accepts only VERIFIED GitHub engineering Runs. bridge.task_transition remains GitHub Durable Task Runtime coordination.
 
@@ -104,7 +110,7 @@ Normal customer enrollment is self-service and does not expose Cloudflare or ser
 
 ~~~text
 Bridge OAuth principal
-  -> bridge.run(mode="connect")
+  -> bridge.create_host_pairing()
   -> signed short-lived pairing capability
   -> customer host generates runner token locally
   -> pairing claim sends only runner-token SHA-256
@@ -190,7 +196,8 @@ The canonical workflows remain examples/bridge-gateway.yml and examples/bridge-p
 
 ## 7. GitHub Run model
 
-One repository-backed bridge.run batch represents:
+An internal repository batch materializes the following bounded execution plan;
+it is not a caller-authored mixed-step MCP input:
 
 ~~~text
 resolve exact target + trusted policy

@@ -6,6 +6,7 @@ import { GitHubAppCredentialProvider } from '../auth/github-app-credentials.mjs'
 import { GitHubAppUserAuthClient } from '../auth/github-user-auth.mjs';
 import { createRequestScopedGateway } from '../control-plane.mjs';
 import { createBridgeMcpHandler } from '../mcp-server.mjs';
+import {createRepositoryCatalogCache} from '../mcp-repository-catalog.mjs';
 import { parseRemoteServiceConfig } from '../remote-service.mjs';
 import { DurableTaskTransition } from '../task-transition.mjs';
 import { D1BridgeIdentityStore } from './d1-identity-store.mjs';
@@ -497,6 +498,7 @@ export function createCloudflareBridgeOAuthProvider({
       const gateway=buildGateway(taskSession);
       const mcp=createBridgeMcpHandler({
         gateway,
+        repositoryCatalogCache:createRepositoryCatalogCache({kv:bindings.OAUTH_KV,owner:principal.bridgeUserId,origin:config.publicUrl.href}),
         gatewayForTool:async ({taskSessionToken}) => {
           assertBridge(
             taskSession===null,

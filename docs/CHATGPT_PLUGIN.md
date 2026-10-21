@@ -1,254 +1,168 @@
 # ChatGPT / Codex package
 
-Bridge is intended to be consumed as one agent-facing package: workflow instructions plus the stable Bridge MCP service.
-
-## 1. Package roles
-
-```text
-plugin.json + .app.json / Skills
-  -> bind the package to the registered Bridge app and teach when/how to use Bridge
-
-Bridge MCP
-  -> exposes six stable tools: five execution/evidence tools plus one fenced task transition
-
-Bridge protocol/runtime
-  -> enforces identity, policy, host authority, execution bounds and publication safety
-```
-
-The package/Skill layer is not an authority source. Installing or reading it cannot broaden repository, project, host or task-runtime authority.
-
-## 2. Stable MCP surface
-
-The public tool surface is fixed:
-
-```text
-bridge.discover
-bridge.run
-bridge.get_run
-bridge.get_result
-bridge.publish
-bridge.task_transition
-```
-
-Do not add capability-specific public tools.
-
-### bridge.discover
-
-Input:
-
-- repository.
-
-Returns bounded trusted metadata such as:
-
-- trusted policy identity;
-- named capabilities/presets;
-- logical resources;
-- generic exec/edit availability and limits;
-- runner classes.
-
-It does not expose physical host paths, credentials or raw privileged command templates.
-
-### bridge.run
-
-Direct commands wait up to 10 seconds by default and return completed output
-inline. The optional `waitSeconds` integer is 0–10; use `0` for immediate async
-return, or 1–10 to choose a waiting window. Other modes keep immediate behavior. If pending,
-interrupted or unavailable, keep the returned Run ID and query it; never submit
-a second Run just to obtain the result. File resource links still require an
-explicit `bridge.get_result`. See [bounded waiting](DIRECT_EXEC.md#bounded-result-waiting).
-
-
-Canonical execution uses `mode: batch`:
-
-```text
-one Run
-  -> one exact-target shared ephemeral workspace
-  -> ordered exec / preset / edit steps
-  -> one terminal result
-```
-
-Compatibility modes remain:
-
-- `mode: capability`;
-- `mode: edit`.
-
-The caller supplies repository + target ref and may assert an exact target SHA. Bridge resolves the trusted policy from the repository's trusted/default policy ref; the model does not choose `policySha`.
-
-For a durable task, a cloud-hosted Worker may additionally supply the opaque short-lived `taskSessionToken` issued by task activation. The model does not supply authoritative `workerId` or `leaseEpoch`.
-
-#### First-class file transport
-
-`bridge.run` also carries the common Bridge file workflow without adding a
-seventh public tool.
-
-For ChatGPT-native ingress, the top-level `file` field is declared through
-`_meta["openai/fileParams"]`. ChatGPT supplies an authorized
-`{download_url,file_id,mime_type?,file_name?}` object. Bridge consumes that
-temporary URL inside the authenticated MCP request, verifies the bounded bytes,
-stores the file in private R2 and returns a READY temporary `assetId` with `expiresAt` (24h by default).
-The model is not given an upload token and does not perform an out-of-band PUT.
-
-For Direct host egress, a caller declares bounded `exports` descriptors and
-uses exact `{export:N}` argv placeholders. The runner allocates fresh
-Bridge-owned paths, then uploads only those produced files while its current
-host/run lease is valid. The caller never supplies a host filesystem path.
-
-Only `bridge.get_result` returns READY imported/exported files as MCP `resource_link` content using a short-lived `bridge-file:///access/<capability>` URI. `bridge.run` and `bridge.get_run` return metadata without file resource links. An import receipt's `assetId` can immediately be used as host input; clients needing a file link call `bridge.get_result` with its `runId`. The capability is bound to the same authenticated Bridge principal; the temporary file expiry also applies. Save needed files before `expiresAt`; reads are retryable and do not delete the file. Legacy permanent objects remain unchanged. A resource read verifies signature, expiry, principal ownership, size and SHA-256 before returning binary content. The stable six-tool surface therefore remains intact;
-files use tool parameters/results plus MCP resources.
-
-The older metadata -> upload ticket -> caller PUT path remains a compatibility
-transport for programmable clients, not the canonical ChatGPT path.
-
-### bridge.get_run
-
-Returns normalized durable Run state and identity metadata. For a task-bound Run, a cloud-hosted Worker supplies the current `taskSessionToken`; a successful current-owner poll participates in the same bounded sliding lease/session renewal as the other task-aware operations.
-
-### bridge.get_result
-
-Returns bounded structured terminal evidence/result for the Run. For a task-bound Run, a cloud-hosted Worker supplies the current `taskSessionToken`; successful evidence retrieval validates the same task/owner/epoch binding and may renew the still-live lease/session within the configured bound.
-
-### bridge.publish
-
-Publishes an already VERIFIED candidate to the branch bound to that Run.
-
-Input is:
-
-- `runId`;
-- optional opaque `taskSessionToken` for durable task sessions.
-
-The caller cannot redirect publication to another repository/branch.
-
-### bridge.task_transition
-
-After first persisting the authoritative GitHub checkpoint or blocker, a Worker with a current durable task session may report:
-
-- `READY` with exact checkpoint SHA and checkpoint comment ID;
-- `BLOCKED` with a stable reason code matching the exact durable blocker-comment pointer in managed Issue state;
-- `DONE` with exact checkpoint SHA and checkpoint comment ID.
-
-`READY` may set `continue: true` only when durable GitHub state has a non-empty next stage explicitly marked `continuation: same-worker`. Independent review/other-Worker gates use `handoff` and release the lease without a same-Worker claim. A successful claim rotates the lease epoch and returns a new opaque task-session token. The tool cannot enroll tasks, select another repository or branch, invent a stage, or bypass OAuth/repository grants/D1 fencing.
-
-Bridge also binds checkpoint/blocker comments to the verified GitHub user ID of the enrolled Bridge principal. A marker copied into the Issue by another commenter is ignored during expiry recovery and rejected during exact transition verification.
-
-## 3. Authentication and repository onboarding
-
-The canonical product path is:
-
-```text
-ChatGPT / Codex
-  -> Bridge MCP OAuth
-  -> Cloudflare OAuth Provider
-  -> GitHub user authorization
-  -> official Bridge GitHub App
-  -> GitHub-native repository selection
-  -> D1 Bridge principal/install/repository grants
-  -> authenticated Bridge MCP
-```
-
-End users do not handle:
-
-- the GitHub App private key;
-- GitHub App client secret;
-- installation access tokens;
-- a production PAT;
-- installation IDs as configuration;
-- D1/KV setup;
-- repository-grant JSON.
-
-GitHub user credentials used during onboarding are ephemeral and are not persisted as Bridge bearer credentials.
-
-After onboarding, every operation remains constrained by:
-
-```text
-Bridge OAuth principal
-  ∩ GitHub App installation/repository selection
-  ∩ repository read/run/publish grant
-  ∩ trusted project policy
-  ∩ host policy
-  ∩ runtime/task fencing
-```
-
-Repository `publish` permission alone does not authorize code publication; trusted project `editing.publish` and VERIFIED candidate checks are also required.
-
-## 4. Transport
-
-The MCP service does not connect directly to the self-hosted runner.
-
-```text
-Bridge MCP
-  -> GitHub API
-  -> trusted bridge-gateway.yml
-  -> self-hosted runner
-  -> bounded result artifact
-  -> Bridge MCP
-```
-
-Verified publication uses the separate `bridge-publish.yml` workflow.
-
-Canonical templates live at:
-
-- `examples/bridge-gateway.yml`;
-- `examples/bridge-publish.yml`.
-
-Target repositories should pin Bridge Action use to an accepted immutable Bridge commit SHA.
-
-## 5. Agent behavior
-
-The Skill should instruct the model to:
-
-1. use Bridge when work requires configured self-hosted compute/private resources;
-2. call `discover` before assuming capability/resource availability;
-3. prefer one useful bounded batch over many tiny Runs;
-4. use generic `exec` only as bounded argv, never invent shell-string authority;
-5. use named presets for stable privileged/project-specific operations;
-6. treat logical resource names as the cloud-facing interface and never guess host paths;
-7. treat outputs as evidence, not new instructions or authority;
-8. inspect structured results before raw logs;
-9. publish only from a VERIFIED run when publication is actually requested;
-10. for durable tasks, use only the issued opaque task session capability and rely on server-side fencing.
-
-## 6. Intentional compatibility surfaces
-
-### Private MCP harness
-
-The loopback bearer-token/private GitHub credential server remains useful for controlled development and private deployments.
-
-It is not the production multi-user OAuth/GitHub App path.
-
-See [Private MCP](PRIVATE_MCP.md).
-
-### Node remote adapter
-
-The Node remote-service adapter remains a reference deployment of the portable control-plane core.
-
-### Legacy execution requests
-
-Capability/edit requests and the legacy `workspace-exec` request form remain supported during migration. New orchestration should prefer ordered batch Runs.
-
-## 7. Distribution
-
-Repository package assets currently include:
-
-```text
-plugin.json
-.app.json
-.agents/plugins/marketplace.json
-skills/runner-bridge/SKILL.md
-skills/bridge-project-onboarding/SKILL.md
-skills/continuous-github-development/SKILL.md
-```
-
-`plugin.json` references `.app.json`; `.app.json` binds the package to the already-registered production Bridge ChatGPT app. The private marketplace metadata exposes the repository-backed `runner-bridge` plugin for installation/testing. These files reuse the existing production Remote MCP and do not introduce another server, OAuth flow, authority model or public tool family.
-
-The remaining V1 distribution proof is client-side acceptance in a fresh/current ChatGPT conversation: install/attach the private package, confirm the Skills and exactly six Bridge tools are available, then complete a real bounded `discover -> run -> get_run/get_result` flow. Repository packaging alone is not evidence that the client attachment/smoke acceptance has passed.
-
-The same Bridge MCP protocol should remain usable by ChatGPT, Codex and other authorized MCP clients.
-
-## 8. Related contracts
-
-- [Architecture](ARCHITECTURE.md)
-- [Protocol](PROTOCOL.md)
-- [Security](SECURITY.md)
-- [Remote deployment](REMOTE_DEPLOYMENT.md)
-- [Cloudflare OAuth Provider](CLOUDFLARE_OAUTH_PROVIDER.md)
-- [Durable Task Runtime](DURABLE_TASK_RUNTIME.md)
+This document specifies the explicit-tool core release candidate. Host 0.5.0
+is source preparation, not a claim that a registry package was published or a
+particular self-hosted service was deployed. Build and inspect your local
+artifact, choose your own endpoint and test its actual tool inventory.
+
+## Package, deployment and authority
+
+The three Skills teach when to use the configured Bridge MCP service. They do
+not grant Host, repository, project or task authority. Follow
+[Self-hosted configuration](SELF_HOSTED_CONFIGURATION.md) for operator settings
+and [Host quickstart](HOST_QUICKSTART.md) for source-built installation.
+
+The exported `.app.json` has no App binding. If you package the Skills for a
+client that requires one, use your own verified connected App through the
+existing package process. Preserve that identity on updates; never substitute
+another deployment's App, endpoint, OAuth credentials or plugin identifiers.
+
+The loopback private MCP harness and remote OAuth service expose the same
+operation contracts, under their own configured principal and credentials.
+See [Private MCP](PRIVATE_MCP.md) and
+[Cloudflare OAuth Provider](CLOUDFLARE_OAUTH_PROVIDER.md). Neither transport
+changes the policy, service-user, resource or exact-SHA execution boundaries.
+
+## Seventeen fixed tools
+
+Each tool represents one user goal, with a closed input schema and explicit
+boolean safety annotations. No generic mode or arbitrary capability dispatch
+is a model input.
+
+| Goal | Tool | Principal input |
+| --- | --- | --- |
+| List owned computers | `bridge.list_hosts` | None |
+| Prepare local pairing | `bridge.create_host_pairing` | Optional bounded lifetime |
+| Pause Direct execution | `bridge.pause_host` | Owned logical `hostId` |
+| Resume Direct execution | `bridge.resume_host` | Owned logical `hostId` |
+| Run a Host command | `bridge.run_host_command` | `hostId`, argv and bounded command/file options |
+| Import an attachment | `bridge.import_file` | Native `file`, optional temporary lifetime |
+| Prepare byte upload | `bridge.create_file_upload` | Filename, MIME type, exact size and SHA-256 |
+| Delete a permanent asset | `bridge.delete_file` | Owned `assetId` |
+| Inspect repository setup | `bridge.get_repository_configuration` | Exact `repository` |
+| Inspect project-tool availability | `bridge.repository_tools_status` | None |
+| Run repository commands | `bridge.execute_repository_commands` | Repository/target, `expectedPolicySha`, command records |
+| Run required project checks | `bridge.verify_repository` | Repository/target, `expectedPolicySha` |
+| Edit and verify | `bridge.edit_and_verify_repository` | Same identities, bounded text edits, commit subject |
+| Inspect task state | `bridge.get_run` | Actual `runId` |
+| Read evidence and output files | `bridge.get_result` | Actual `runId` |
+| Publish verified changes | `bridge.publish` | VERIFIED `runId` |
+| Release a task stage | `bridge.task_transition` | READY/BLOCKED/DONE and matching checkpoint/blocker identity |
+
+Inspect the actual deployment's descriptors and provider availability. A local
+source build is not evidence that pairing, storage, GitHub credentials or an
+Actions runner have been configured on a remote endpoint.
+
+## Ordinary Host tasks
+
+List Hosts and explicitly select a returned `hostId`. Use
+`bridge.run_host_command` with bounded argv and a relative cwd. It waits up to
+10 seconds by default; `waitSeconds: 0` returns an asynchronous receipt. A
+response timeout or disconnect does not cancel or repeat the command. Once a
+`runId` is available, inspect that same task with the getters before any new
+submission. If the first response is lost, inspect actual execution and side
+effects rather than assuming nothing ran.
+
+This core does not accept a client `idempotencyKey` or promise persistent
+submission deduplication. Internal request identities and the Host journal still
+fence recognized execution/replay; they do not make two new submissions one task.
+
+Source-built Host 0.5.0 requires your explicit HTTPS endpoint. It completes
+browser OAuth, calls `bridge.create_host_pairing` and claims its short-lived
+capability locally. Upgrades preserve saved Host identity, runner credential,
+service settings and journal. Pairing material remains in the official flow
+and private local storage, outside chat and ordinary logs.
+
+Pause/resume change Direct Host execution permission. They do not undo completed
+side effects or stop a separate GitHub Actions runner. A registration record
+alone does not prove a live connection. Check actual Host status and last contact.
+
+## Files in both directions
+
+`bridge.import_file` declares a top-level native `file` through
+`_meta["openai/fileParams"]: ["file"]`. Its inline closed object contains exactly
+`download_url`, `file_id`, optional `mime_type` and optional `file_name`; the first
+two are required. The server checks approved HTTPS delivery hosts, redirects,
+size and SHA-256, then returns a READY temporary asset. Native import requires
+no second caller-side PUT.
+
+Pass returned asset IDs to the Host command's `assets` list and use exact
+`{asset:N}` argv placeholders. Declare bounded `exports` and `{export:N}` slots
+for output. The caller never supplies physical Host input/output storage paths.
+Only `bridge.get_result` adds principal-bound MCP resource links for READY files;
+resource reads verify ownership, expiry, size and SHA-256.
+
+New native transfers normally expire 24 hours after READY. Use actual returned
+deadlines and save needed files before expiry. Reads are retryable rather than
+delete-on-read acknowledgements. Existing permanent assets keep their lifecycle;
+`bridge.delete_file` requires specific owner authority and deletes only an owned
+permanent asset, not a local Host file or retained execution receipt.
+
+Programmable clients uploading their own bytes can use
+`bridge.create_file_upload`, then its protected upload mechanism. A ticket does
+not prove READY. Keep upload credentials within that client and use the returned
+ticket deadline; it differs from the native import/export expiry.
+
+## Repository engineering
+
+1. Read `bridge.get_repository_configuration` for the authorized repository.
+   Retain its exact policy SHA as `expectedPolicySha`. Resolve the existing target
+   ref and optionally assert `targetSha`; the server pins the actual target before
+   admission. Changed policy fails closed.
+2. Use `bridge.execute_repository_commands` for 1–16 records with unique IDs,
+   argv, relative cwd, logical resources and bounded timeouts. It accepts commands
+   only and produces no publishable candidate. It does not accept mixed steps.
+3. The trusted default policy must declare `mcp.verification`: 1–4 fixed entries
+   such as `{capability:"verify",parameters:{}}`, each referring to a declared
+   `class:"verify"` preset with reviewed fixed parameters and the real quality gate.
+   `bridge.verify_repository` runs that recipe. Missing or stale recipe is an error.
+4. `bridge.edit_and_verify_repository` applies bounded `replace-exact` /
+   `apply-patch` modifications to existing tracked text files and runs the same
+   mandatory checks. The caller cannot substitute verification or authorize from
+   a candidate branch. Require actual VERIFIED evidence.
+5. `bridge.publish` separately publishes the exact verified candidate subject to
+   current repository authority, policy, target and task fences. A stale target
+   is rejected rather than force-overwritten.
+
+Extra trusted observe/verify presets have independent upfront descriptors with
+server-generated names and closed schemas. Use only actual tools in the current
+list; configuration capability IDs are not executable tool names. The extra
+catalog allows at most 16 authorized repositories and 46 presets. Overflow makes
+the entire extra catalog unavailable instead of silently truncating it; fixed
+Host tools stay available. `bridge.repository_tools_status` reports actual policy
+or catalog faults. Refresh client tool discovery after an approved catalog change.
+No additional named mixed-workflow feature is promised by this release.
+
+The internal batch envelope remains the runner protocol, not public MCP input.
+Each Run has its own bounded workspace; separate Runs do not share scratch state.
+Current engineering templates use Linux/x64/Bash. Configure the Actions runner
+and protected Host policy separately from Direct Host pairing. Pin Bridge Actions
+to your accepted immutable runtime SHA, never a branch name or another repository.
+
+## Durable sessions
+
+Carry only the activation-issued `taskSessionToken` on task-aware repository,
+evidence, publication and transition calls. The server resolves its owner and
+fencing epoch; the model does not supply authoritative `workerId` or `leaseEpoch`.
+Successful current-owner operations may renew the bounded lease/session, so
+result getters are not marked read-only merely because they retrieve evidence.
+
+Persist the authoritative GitHub checkpoint or blocker before
+`bridge.task_transition`. READY/DONE require its exact checkpoint SHA and comment
+ID. BLOCKED supplies the stable matching reason. Only a valid READY `same-worker`
+continuation may claim the next already-authorized stage; independent review uses
+handoff. Keep raw session tokens out of source, checkpoints and ordinary logs.
+
+## Acceptance
+
+Use real SDK clients and the deployment runtime to inspect the tool inventory,
+closed schemas, annotations and native file fields. Test unauthorized inputs,
+policy/target/session drift, same-run recovery, transfers in both directions,
+verified publication, and Host identity/service persistence across upgrade.
+
+Run the public-core boundary gate, full relevant CI and package checks for the
+exact candidate. A previous API scan, valid archive or successful source build
+does not prove that a fresh ChatGPT/Codex connection has run these operations.
+See [repository bootstrap](GITHUB_BOOTSTRAP.md), [Direct Exec](DIRECT_EXEC.md),
+[Direct files](DIRECT_ASSETS.md), [protocol](PROTOCOL.md) and
+[durable tasks](DURABLE_TASK_RUNTIME.md) for the individual contracts.

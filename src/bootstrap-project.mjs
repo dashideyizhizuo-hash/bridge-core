@@ -99,6 +99,7 @@ function projectPolicy({repository,runnerClass,verify}) {
         }
       }
     },
+    mcp:{verification:[{capability:'verify',parameters:{}}]},
     workspaceExec:{
       enabled:true,
       runner:'default',
@@ -283,7 +284,7 @@ export function bootstrapProject({
       'commit generated repository files to the default branch',
       'ensure the Bridge GitHub App/repository grant includes this repository',
       'ensure a self-hosted GitHub runner with the declared runner class is online',
-      'run bridge.discover(repository) acceptance'
+      'run bridge.get_repository_configuration(repository) acceptance'
     ]
   };
 }
