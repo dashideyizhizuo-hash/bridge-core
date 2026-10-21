@@ -31,7 +31,7 @@ export const MCP_TOOL_DEFINITIONS = [
       },
       required:['mode'],
       properties:{
-        mode:{enum:['host','connect','asset','direct','capability','edit','batch']},
+        mode:{type:'string',enum:['host','connect','asset','direct','capability','edit','batch']},
         host:{type:'string',pattern:'^[A-Za-z0-9_.-]{1,128}$'},
         enabled:{type:'boolean'},
         argv:{
@@ -77,8 +77,8 @@ export const MCP_TOOL_DEFINITIONS = [
         targetSha:{type:'string',pattern:'^[0-9a-f]{40}$'},
         capability:{type:'string'},
         parameters:{type:'object'},
-        operations:{type:'array',minItems:1,maxItems:64},
-        verification:{type:'array',minItems:1,maxItems:4},
+        operations:{type:'array',minItems:1,maxItems:64,items:{type:'object'}},
+        verification:{type:'array',minItems:1,maxItems:4,items:{type:'object'}},
         steps:{type:'array',minItems:1,maxItems:16,items:{type:'object'}},
         commitSubject:{type:'string',minLength:3,maxLength:120},
         taskSessionToken:{type:'string',pattern:'^bts_[A-Za-z0-9_-]{43,128}$'}
@@ -135,7 +135,7 @@ export const MCP_TOOL_DEFINITIONS = [
       additionalProperties:false,
       required:['outcome'],
       properties:{
-        outcome:{enum:['READY','BLOCKED','DONE']},
+        outcome:{type:'string',enum:['READY','BLOCKED','DONE']},
         checkpointSha:{type:'string',pattern:'^[0-9a-f]{40}$'},
         stateCommentId:{type:'integer',minimum:1},
         continue:{type:'boolean'},
