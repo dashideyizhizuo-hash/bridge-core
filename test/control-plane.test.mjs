@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createBridgePrincipal } from '../src/auth/principal.mjs';
 import { createRequestScopedGateway } from '../src/control-plane.mjs';
+import {invokePublicTool} from '../src/mcp-public-api.mjs';
 
 const REPO='example/project';
 const INSTALLATION_ID=12345;
@@ -320,4 +321,21 @@ test('incorrectly bound installation credential fails before repository GitHub a
     error=>error.code==='GITHUB_APP_CREDENTIAL_INVALID'
   );
   assert.equal(githubCalls,0);
+});
+
+test('repository configuration propagates cancellation through credential acquisition without contacting GitHub',async()=>{
+  const controller=new AbortController();let sent=0,acquired=0;
+  const gateway=createRequestScopedGateway({principal:principal(),principalRepositoryAuthorizer:authorizerForAlice(),installationResolver:createInstallationResolver(),
+    credentialProvider:{async acquire(input){assert.equal(input.signal,controller.signal);acquired++;controller.abort();return {token:'fixture-token',installationId:INSTALLATION_ID,repository:REPO,permission:'read'};}},
+    fetchImpl:async()=>{sent++;throw new Error('must not send');}});
+  await assert.rejects(invokePublicTool(gateway,'bridge.get_repository_configuration',{repository:REPO},{signal:controller.signal}));
+  assert.equal(acquired,1);assert.equal(sent,0);
+});
+
+test('repository metadata cancellation reaches fetch and prevents default-branch or policy requests',async()=>{
+  const controller=new AbortController(),github=bridgeGitHubFetch();
+  const gateway=createRequestScopedGateway({principal:principal(),principalRepositoryAuthorizer:authorizerForAlice(),installationResolver:createInstallationResolver(),credentialProvider:createCredentialProvider(),
+    fetchImpl:async(input,init)=>{assert.equal(init.signal,controller.signal);const result=await github.fetchImpl(input,init);controller.abort();return result;}});
+  await assert.rejects(invokePublicTool(gateway,'bridge.get_repository_configuration',{repository:REPO},{signal:controller.signal}));
+  assert.equal(github.calls.length,1);assert.equal(github.calls[0].pathname,'/repos/'+REPO);
 });

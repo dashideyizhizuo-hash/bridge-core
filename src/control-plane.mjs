@@ -111,7 +111,8 @@ export class RequestScopedGitHubTransport {
     this.taskLeaseValidator = taskLeaseValidator;
   }
 
-  async #transportFor(repository, permission) {
+  async #transportFor(repository, permission, {signal}={}) {
+    signal?.throwIfAborted();
     const requestedPermission = permissionName(permission);
 
     // Principal authorization is deliberately first. No installation lookup,
@@ -119,20 +120,26 @@ export class RequestScopedGitHubTransport {
     const repo = await this.principalRepositoryAuthorizer.assert({
       principal: this.principal,
       repository,
-      permission: requestedPermission
+      permission: requestedPermission,
+      ...(signal?{signal}:{})
     });
+    signal?.throwIfAborted();
 
     const resolved = await this.installationResolver.resolve({
       principal: this.principal,
-      repository: repo
+      repository: repo,
+      ...(signal?{signal}:{})
     });
+    signal?.throwIfAborted();
     const resolvedInstallationId = installationId(resolved?.installationId);
 
     const credential = await this.credentialProvider.acquire({
       installationId: resolvedInstallationId,
       repository: repo,
-      permission: requestedPermission
+      permission: requestedPermission,
+      ...(signal?{signal}:{})
     });
+    signal?.throwIfAborted();
     assertBridge(
       credential &&
         typeof credential.token === 'string' &&
@@ -162,16 +169,16 @@ export class RequestScopedGitHubTransport {
     return this.principalRepositoryAuthorizer.list({principal:this.principal});
   }
 
-  async resolveRepository(repository) {
-    return (await this.#transportFor(repository, 'read')).resolveRepository(repository);
+  async resolveRepository(repository, options={}) {
+    return (await this.#transportFor(repository, 'read',options)).resolveRepository(repository,options);
   }
 
   async resolveTarget(repository, target) {
     return (await this.#transportFor(repository, 'read')).resolveTarget(repository, target);
   }
 
-  async readProjectPolicy(repository, policySha) {
-    return (await this.#transportFor(repository, 'read')).readProjectPolicy(repository, policySha);
+  async readProjectPolicy(repository, policySha, options={}) {
+    return (await this.#transportFor(repository, 'read',options)).readProjectPolicy(repository, policySha,options);
   }
 
   async submitCapabilityRequest(request) {

@@ -154,10 +154,10 @@ export class BridgeGateway {
   async #trustedContext(repository,{signal}={}) {
     signal?.throwIfAborted();
     const repo=repositoryName(repository);
-    const info=await this.transport.resolveRepository(repo);
+    const info=await this.transport.resolveRepository(repo,{signal});
     signal?.throwIfAborted();
     assertBridge(info && typeof info.defaultRef === 'string' && /^[0-9a-f]{40}$/.test(info.defaultSha), 'GATEWAY_TRANSPORT_INVALID', 'transport returned invalid repository identity');
-    const policy=validateProjectPolicy(await this.transport.readProjectPolicy(repo,info.defaultSha),repo);
+    const policy=validateProjectPolicy(await this.transport.readProjectPolicy(repo,info.defaultSha,{signal}),repo);
     signal?.throwIfAborted();
     return { repository:repo, info, policy };
   }
