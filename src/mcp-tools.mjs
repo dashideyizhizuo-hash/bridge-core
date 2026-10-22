@@ -116,7 +116,7 @@ export const MCP_TOOL_DEFINITIONS = [
             "maxLength": 8192,
             "pattern": "^[^\\u0000]+$"
           },
-          "description": "Executable followed by separate argv entries. The backend also caps the encoded argv at 65536 UTF-8 bytes. Managed file paths use exact {asset:N} or {export:N} entries."
+          "description": "Executable followed by separate argv entries, capped at 65536 UTF-8 bytes. Put each {asset:N} or {export:N} in its own argv entry, never inside script text. Scripts can instead read BRIDGE_ASSET_0 / BRIDGE_EXPORT_0 from the environment (PowerShell: $env:BRIDGE_ASSET_0 / $env:BRIDGE_EXPORT_0). Emit UTF-8 output."
         },
         "cwd": {
           "type": "string",

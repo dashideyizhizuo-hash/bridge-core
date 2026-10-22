@@ -199,9 +199,29 @@ Run ID, lease owner, unexpired RUNNING lease, host credential, principal owner,
 and that the requested asset is declared by that Run. A valid host credential
 alone is not sufficient to fetch another principal-owned or same-owner asset.
 
-Only an argv element exactly equal to `{asset:N}` is replaced. Embedded
-expansion is not supported. Staged paths are also exposed as
-`BRIDGE_ASSET_0`, `BRIDGE_ASSET_1`, and so on.
+Only an argv element exactly equal to `{asset:N}` or `{export:N}` is replaced.
+Embedding a placeholder in script text or a flag value is rejected before
+queueing; Bridge never inserts a managed path into executable script text.
+Scripts can read the Host-provided environment instead: `BRIDGE_ASSET_0`,
+`BRIDGE_ASSET_1`, or `BRIDGE_EXPORT_0` and so on. In PowerShell these are
+`$env:BRIDGE_ASSET_0` and `$env:BRIDGE_EXPORT_0`.
+
+For a binary-preserving input-to-output copy on Windows:
+
+```json
+{
+  "hostId": "<returned owned host ID>",
+  "assets": ["<READY asset ID>"],
+  "exports": [{"fileName":"result.md","mimeType":"text/markdown","maxBytes":26214400}],
+  "argv": ["powershell.exe","-NoProfile","-NonInteractive","-Command","$ErrorActionPreference='Stop'; [IO.File]::Copy($env:BRIDGE_ASSET_0,$env:BRIDGE_EXPORT_0,$false); [Console]::WriteLine('COPIED')"]
+}
+```
+
+For an owner-requested local destination, use the same managed input and an
+exclusive binary copy to that authorised destination; verify the resulting
+byte count and SHA-256 before reporting success. Do not recode arbitrary file
+bytes through `Get-Content` / `Set-Content`. Stdout/stderr must be UTF-8;
+`OUTPUT_ENCODING_INVALID` is not evidence that a write had no side effects.
 
 ## Security and integrity invariants
 

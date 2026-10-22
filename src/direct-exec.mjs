@@ -182,6 +182,18 @@ function materializeExportArgv(argv,exports,exportPaths) {
   });
 }
 
+// Admission/execution check, deliberately separate from persisted request
+// parsing so a malformed historical command still has recoverable evidence.
+export function assertDirectFileArgv(argv) {
+  for(const arg of Array.isArray(argv) ? argv : []) {
+    if(typeof arg!=='string') continue;
+    for(const token of arg.match(/\{(?:asset|export):\d+\}/g) ?? []) {
+      assertBridge(arg===token,'DIRECT_EXEC_INVALID',
+        'Managed file placeholders must be standalone argv entries. In scripts use BRIDGE_ASSET_0 or BRIDGE_EXPORT_0 from the process environment; PowerShell uses $env:BRIDGE_ASSET_0 or $env:BRIDGE_EXPORT_0.');
+    }
+  }
+}
+
 export function validateDirectExecRequest(request) {
   assertBridge(isObject(request), 'DIRECT_EXEC_INVALID', 'direct exec request must be an object');
   const allowed = new Set(['schemaVersion','requestId','hostId','argv','cwd','timeoutSeconds','assets','exports']);
@@ -234,6 +246,7 @@ export function validateDirectExecRequest(request) {
 
 export function resolveDirectExecPlan({ request, hostPolicy, defaultRoot = homedir() }) {
   const validatedRequest = validateDirectExecRequest(request);
+  assertDirectFileArgv(validatedRequest.argv);
   const validatedHost = validateHostPolicy(hostPolicy);
   const policy = validatedHost.directExec;
   assertBridge(policy?.enabled === true, 'DIRECT_EXEC_DENIED', 'direct exec is not enabled by host policy');

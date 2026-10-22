@@ -18,6 +18,16 @@ test('removed aggregate tools and unknown names cannot invoke the gateway',async
   assert.equal(f.calls.length,0);
 });
 
+test('embedded managed paths are rejected before gateway dispatch',async()=>{
+  const f=fixture();
+  for(const script of ["$src='{asset:0}'", "write('{export:0}')"]) {
+    await assert.rejects(invokePublicTool(f.gateway,'bridge.run_host_command',{
+      hostId:'host-a',argv:['powershell.exe','-Command',script],assets:['asset-12345678']
+    }),error=>error.code==='DIRECT_EXEC_INVALID'&&/standalone argv/.test(error.message));
+  }
+  assert.equal(f.calls.length,0);
+});
+
 test('all fixed tools reject mode, arbitrary parameters and hidden authority before dispatch',async()=>{
   const f=fixture();
   const cases={

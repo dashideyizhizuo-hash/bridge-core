@@ -1,6 +1,6 @@
 import { assertBridge } from '../errors.mjs';
 import { assertAuthenticatedPrincipal } from '../auth/principal.mjs';
-import { validateDirectExecRequest } from '../direct-exec.mjs';
+import { assertDirectFileArgv, validateDirectExecRequest } from '../direct-exec.mjs';
 
 const HOST_PATTERN=/^[A-Za-z0-9_.-]{1,128}$/;
 const TOKEN_HASH_PATTERN=/^[0-9a-f]{64}$/;
@@ -291,6 +291,7 @@ export class D1DirectExecStore {
     const active=assertAuthenticatedPrincipal(principal);
     const host=await this.resolveHost({principal:active,hostId:value});
     const validated=validateDirectExecRequest({...request,hostId:host});
+    assertDirectFileArgv(validated.argv);
     const runId=runIdFor(host,validated.requestId);
     const now=this.clock();
     const expiresAt=now+queueTtl(queueTtlMs);

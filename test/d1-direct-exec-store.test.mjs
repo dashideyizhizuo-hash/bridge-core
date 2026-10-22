@@ -337,6 +337,24 @@ function request(id='direct-1234',hostId='host-main') {
   };
 }
 
+test('new embedded managed paths cannot be queued and historical failed evidence remains readable',async()=>{
+  const db=new FakeD1(),store=new D1DirectExecStore({db,clock:()=>NOW});
+  const user=principal();
+  await store.registerHost({principal:user,hostId:'host-main',runnerTokenSha256:TOKEN});
+  const bad={...request(),argv:['powershell.exe','-Command',"$src='{asset:0}'"]};
+  await assert.rejects(store.submit({principal:user,request:bad}),{code:'DIRECT_EXEC_INVALID'});
+  assert.equal(db.runs.size,0);
+  // Model a terminal row accepted before this validation existed. Its failure
+  // evidence remains recoverable and must not require command resubmission.
+  const accepted=await store.submit({principal:user,request:request()});
+  const old=db.runs.get('direct-1234');
+  old.requestJson=JSON.stringify(bad);old.status='FAILED';old.completedAt=NOW;
+  old.resultJson=JSON.stringify({requestId:'direct-1234',hostId:'host-main',status:'FAILED',execution:{exitCode:1},error:{code:'OUTPUT_ENCODING_INVALID'}});
+  const result=await store.getResult({principal:user,runId:accepted.runId});
+  assert.equal(result.status,'FAILED');assert.equal(result.execution.exitCode,1);
+  assert.equal(result.error.code,'OUTPUT_ENCODING_INVALID');
+});
+
 test('Direct Exec migrations cover durable runs and hardening metadata',()=>{
   const initial=readFileSync(new URL('../migrations/0009_direct_exec.sql',import.meta.url),'utf8');
   const hardening=readFileSync(new URL('../migrations/0010_direct_exec_hardening.sql',import.meta.url),'utf8');

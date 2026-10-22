@@ -37,6 +37,12 @@ until the owner explicitly selects a real service.
    four-field file input produces a READY temporary asset and actual expiry.
    This completes import; it does not require a second caller-side PUT.
 6. Bind READY asset IDs to Direct Runs with `assets=[...]` and exact `{asset:N}` argv placeholders. For host-to-caller files, declare bounded `exports=[{fileName,mimeType,maxBytes,required}]` and pass only exact `{export:N}` placeholders; never supply or infer an arbitrary host output path.
+   Each placeholder is a whole argv entry. For script-based commands, read the
+   Host-provided environment instead: PowerShell uses `$env:BRIDGE_ASSET_0` /
+   `$env:BRIDGE_EXPORT_0`; Node uses `process.env.BRIDGE_ASSET_0` /
+   `process.env.BRIDGE_EXPORT_0`. Copy bytes without text conversion and verify
+   size plus SHA-256 at the requested destination. See `docs/DIRECT_ASSETS.md`
+   for the tested Windows example.
 7. `bridge.get_result` may return file `resource_link` content for imported/exported private R2 objects. Treat the resource URI/asset ID as the reusable file identity; do not expose R2 keys or invent public URLs.
 8. Use `bridge.pause_host(hostId)` / `bridge.resume_host(hostId)` only for the
    owner's requested Direct Host execution permission change. Pause does not
