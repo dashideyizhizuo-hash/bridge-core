@@ -155,7 +155,8 @@ export class GitHubRestClient {
     this.userAgent = userAgent;
   }
 
-  async request(method, path, { body, accept = 'application/vnd.github+json' } = {}) {
+  async request(method, path, { body, accept = 'application/vnd.github+json',signal } = {}) {
+    signal?.throwIfAborted();
     const response = await this.fetchImpl(new URL(path, this.apiBase), {
       method,
       headers: {
@@ -165,10 +166,12 @@ export class GitHubRestClient {
         'User-Agent': this.userAgent,
         ...(body === undefined ? {} : {'Content-Type':'application/json'})
       },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) })
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...(signal?{signal}:{})
     });
     if (response.status === 204) return null;
     const text = await response.text();
+    signal?.throwIfAborted();
     let data = null;
     if (text) {
       try { data = JSON.parse(text); } catch { data = text; }
@@ -266,11 +269,13 @@ export class GitHubTransport {
     return names;
   }
 
-  async resolveRepository(repository) {
+  async resolveRepository(repository,{signal}={}) {
+    signal?.throwIfAborted();
     const repo = await this.#authorize(repository, 'read');
-    const metadata = await this.github.request('GET', `/repos/${repo}`);
+    signal?.throwIfAborted();
+    const metadata = await this.github.request('GET', `/repos/${repo}`,{signal});
     assertBridge(typeof metadata?.default_branch === 'string' && metadata.default_branch.length > 0, 'GITHUB_TRANSPORT_INVALID', 'repository has no default branch');
-    const commit = await this.github.request('GET', `/repos/${repo}/commits/${encodeURIComponent(metadata.default_branch)}`);
+    const commit = await this.github.request('GET', `/repos/${repo}/commits/${encodeURIComponent(metadata.default_branch)}`,{signal});
     return {
       repository: repo,
       defaultRef: metadata.default_branch,
@@ -290,10 +295,12 @@ export class GitHubTransport {
     return { ref, sha: resolved };
   }
 
-  async readProjectPolicy(repository, policySha) {
+  async readProjectPolicy(repository, policySha,{signal}={}) {
+    signal?.throwIfAborted();
     const repo = await this.#authorize(repository, 'read');
+    signal?.throwIfAborted();
     const exactSha = sha(policySha, 'policy SHA');
-    const payload = await this.github.request('GET', `/repos/${repo}/contents/.bridge/project.json?ref=${exactSha}`);
+    const payload = await this.github.request('GET', `/repos/${repo}/contents/.bridge/project.json?ref=${exactSha}`,{signal});
     return parseJson(decodeContent(payload, 'trusted project policy'), 'trusted project policy');
   }
 
