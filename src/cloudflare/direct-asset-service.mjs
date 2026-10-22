@@ -4,11 +4,6 @@ import { DIRECT_ASSET_MAX_BYTES } from './d1-direct-asset-store.mjs';
 import { readBoundedBody } from './request-body.mjs';
 import { withDirectAssetBufferSlot } from './direct-asset-memory.mjs';
 
-const DEFAULT_IMPORT_HOSTS=Object.freeze([
-  'files.oaiusercontent.com',
-  'files.openai.com'
-]);
-
 function base64url(bytes) {
   let binary='';
   for(const value of bytes) binary+=String.fromCharCode(value);
@@ -30,24 +25,7 @@ function publicOrigin(value) {
   return url.origin;
 }
 
-function normalizeImportHosts(values) {
-  const input=values ?? DEFAULT_IMPORT_HOSTS;
-  assertBridge(Array.isArray(input) && input.length>=1 && input.length<=32,
-    'DIRECT_ASSET_CONFIG_INVALID','Direct Asset import hosts invalid');
-  return input.map(value=>{
-    assertBridge(
-      typeof value==='string' &&
-        /^[A-Za-z0-9.-]{1,253}$/.test(value) &&
-        !value.startsWith('.') &&
-        !value.endsWith('.'),
-      'DIRECT_ASSET_CONFIG_INVALID',
-      'Direct Asset import host invalid'
-    );
-    return value.toLowerCase();
-  });
-}
-
-function allowedImportUrl(value,hosts) {
+function publicImportUrl(value) {
   let url;
   try { url=new URL(value); }
   catch { throw new BridgeError('DIRECT_ASSET_IMPORT_DENIED','file download URL invalid'); }
@@ -55,9 +33,9 @@ function allowedImportUrl(value,hosts) {
     url.protocol==='https:' &&
       !url.username &&
       !url.password &&
-      !url.hash,
+      !url.hash && !url.port,
     'DIRECT_ASSET_IMPORT_DENIED',
-    'file download URL must use credential-free HTTPS'
+    'file download URL must use credential-free HTTPS on port 443'
   );
   const hostname=url.hostname.toLowerCase();
   assertBridge(
@@ -68,10 +46,16 @@ function allowedImportUrl(value,hosts) {
     'file download host invalid'
   );
   assertBridge(
-    hosts.some(host=>hostname===host || hostname.endsWith('.'+host)),
+    hostname.length<=253 && hostname.includes('.') &&
+      hostname.split('.').every(label=>/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)) &&
+      !['localhost','local','internal','home.arpa'].some(suffix=>
+        hostname===suffix || hostname.endsWith('.'+suffix)),
     'DIRECT_ASSET_IMPORT_DENIED',
-    'file download host is not approved by Bridge; an authorized deployment operator must review BRIDGE_FILE_IMPORT_HOSTS',
-    // Diagnose platform file-delivery changes without exposing signed URLs.
+    'file download host must be a public DNS hostname',
+    // DNS/IP isolation is enforced by Workers' public outbound network and
+    // global_fetch_strictly_public, not a preflight lookup vulnerable to
+    // rebinding. Never connect this fetch through a private network binding.
+    // Diagnostics contain only the hostname, never the signed URL.
     {hostname}
   );
   return url;
@@ -127,11 +111,10 @@ function normalizedMime(value) {
 async function fetchImportedBytes({
   url,
   fetchImpl,
-  hosts,
   signal,
   maxRedirects=3
 }) {
-  let current=allowedImportUrl(url,hosts);
+  let current=publicImportUrl(url);
   for(let redirect=0;redirect<=maxRedirects;redirect++) {
     const response=await fetchImpl(current,{
       method:'GET',
@@ -145,7 +128,7 @@ async function fetchImportedBytes({
       const location=response.headers.get('location');
       assertBridge(typeof location==='string' && location.length>0,
         'DIRECT_ASSET_IMPORT_DENIED','file download redirect missing location');
-      current=allowedImportUrl(new URL(location,current).href,hosts);
+      current=publicImportUrl(new URL(location,current).href);
       continue;
     }
     if(!response.ok) {
@@ -170,7 +153,6 @@ export class DirectAssetService {
     resourceCodec=null,
     publicUrl,
     fetchImpl=globalThis.fetch,
-    importHosts,
     randomUUID=()=>globalThis.crypto.randomUUID(),
     randomBytes=size=>{
       const bytes=new Uint8Array(size);
@@ -212,7 +194,6 @@ export class DirectAssetService {
     this.resourceCodec=resourceCodec;
     this.origin=publicOrigin(publicUrl);
     this.fetchImpl=fetchImpl;
-    this.importHosts=normalizeImportHosts(importHosts);
     this.randomUUID=randomUUID;
     this.randomBytes=randomBytes;
   }
@@ -269,7 +250,7 @@ export class DirectAssetService {
       const {bytes,response}=await fetchImportedBytes({
         url:source.download_url,
         fetchImpl:this.fetchImpl,
-        hosts:this.importHosts,signal
+        signal
       });
       const digest=await sha256HexBytes(bytes);
       signal.throwIfAborted();

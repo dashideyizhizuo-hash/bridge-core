@@ -160,7 +160,7 @@ check whether it executed. User consent does not make duplicate side effects saf
 
 ### Bridge error recovery
 
-- `DIRECT_ASSET_IMPORT_DENIED`: inspect the message; this code also covers malformed file metadata and unsafe URLs. If the download hostname is not approved, report a Bridge import-host restriction and the returned hostname only, never the signed URL. An authorized deployment operator can verify the provider hostname and review `BRIDGE_FILE_IMPORT_HOSTS`; a file-transfer request alone does not authorize changing that policy. Do not relay the file through another host to evade the restriction.
+- `DIRECT_ASSET_IMPORT_DENIED`: report the actual bounded reason and returned hostname only; signed download URLs are credentials. Current deployments accept public HTTPS attachment domains without per-domain configuration, while rejecting unsafe metadata, private/local targets, URL credentials and nonstandard ports. An old "host is not approved" response indicates an outdated deployment; direct its operator to update Bridge rather than asking the user to configure each domain. Recover through the native attachment flow; keep network isolation and account ownership checks intact.
 - `UNKNOWN_CAPABILITY`: discover again; do not guess.
 - `PARAMETER_DENIED`: correct the bounded request rather than encoding it into shell syntax.
 - `HOST_RESOURCE_DENIED`: report that project/host authority does not grant the operation/resource.

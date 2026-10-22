@@ -428,7 +428,7 @@ test('MCP-native file import fetches an approved ChatGPT file directly into temp
   assert.equal(objects.get('direct-assets/asset-native-import').options.customMetadata.sha256,sha);
 });
 
-test('MCP-native file import rejects non-approved download hosts before fetching',async()=>{
+test('MCP-native file import rejects private download hostnames before fetching',async()=>{
   let fetched=false;
   const service=new DirectAssetService({
     publicUrl:'https://bridge.example/mcp',
@@ -440,13 +440,13 @@ test('MCP-native file import rejects non-approved download hosts before fetching
     ()=>service.importFile({
       principal:{bridgeUserId:'u',externalProvider:'x',externalSubject:'y'},
       file:{
-        download_url:'https://EVIL.Example/private/sensitive-path?token=synthetic-secret',
+        download_url:'https://Metadata.INTERNAL/private/sensitive-path?token=synthetic-secret',
         file_id:'file_sensitive-id'
       }
     }),
     error=>{
       assert.equal(error.code,'DIRECT_ASSET_IMPORT_DENIED');
-      assert.deepEqual(error.details,{hostname:'evil.example'});
+      assert.deepEqual(error.details,{hostname:'metadata.internal'});
       assert.equal(JSON.stringify(error.details).includes('sensitive'),false);
       assert.equal(JSON.stringify(error.details).includes('token'),false);
       return true;
@@ -462,7 +462,7 @@ test('file import redirect denial reveals only the normalized rejected hostname'
     fetchImpl:async url=>{
       fetched.push(url.hostname);
       return new Response(null,{status:302,headers:{
-        location:'https://Rejected.Example/hidden-path?signature=synthetic-secret'
+        location:'https://Metadata.Internal/hidden-path?signature=synthetic-secret'
       }});
     },
     bucket:{async put(){ throw new Error('must not store'); },async get(){},async delete(){}},
@@ -473,7 +473,7 @@ test('file import redirect denial reveals only the normalized rejected hostname'
     file:{download_url:'https://files.oaiusercontent.com/private?token=synthetic-secret',file_id:'file_sensitive-id'}
   }),error=>{
     assert.equal(error.code,'DIRECT_ASSET_IMPORT_DENIED');
-    assert.deepEqual(error.details,{hostname:'rejected.example'});
+    assert.deepEqual(error.details,{hostname:'metadata.internal'});
     assert.equal(JSON.stringify(error.details).includes('signature'),false);
     return true;
   });

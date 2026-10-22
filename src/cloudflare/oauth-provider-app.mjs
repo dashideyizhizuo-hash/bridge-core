@@ -283,16 +283,7 @@ export function createCloudflareBridgeOAuthProvider({
           bucket:bindings.DIRECT_ASSETS,
           resourceCodec:directAssetResourceCodec,
           publicUrl:config.publicUrl,
-          fetchImpl,
-          ...(typeof bindings.BRIDGE_FILE_IMPORT_HOSTS==='string' &&
-              bindings.BRIDGE_FILE_IMPORT_HOSTS.trim().length>0
-            ? {
-                importHosts:bindings.BRIDGE_FILE_IMPORT_HOSTS
-                  .split(',')
-                  .map(value=>value.trim())
-                  .filter(Boolean)
-              }
-            : {})
+          fetchImpl
         })
       : null;
   const directAssetHandler=
