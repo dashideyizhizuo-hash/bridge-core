@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import {makeTestDirectory as mkdtempSync} from './helpers/canonical-temp.mjs';
 import { tmpdir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { executeDirectExec, resolveDirectExecPlan, validateDirectExecRequest } from '../src/direct-exec.mjs';
+import { assertDirectFileArgv, executeDirectExec, resolveDirectExecPlan, validateDirectExecRequest } from '../src/direct-exec.mjs';
 import { validateHostPolicy } from '../src/validate.mjs';
 
 function setup(overrides = {}) {
@@ -39,6 +40,43 @@ function request(extra = {}) {
     ...extra
   };
 }
+
+test('managed file placeholders embedded in scripts fail before command execution', async () => {
+  const s=setup();
+  try {
+    for(const embedded of ["$src='{asset:0}'", 'cp {asset:0} out', '--input={asset:0}', "fs.writeFileSync('{export:0}','x')"]) {
+      const req=request({argv:[process.execPath,'-e',embedded]});
+      assert.throws(()=>assertDirectFileArgv(req.argv), error=>{
+        assert.equal(error.code,'DIRECT_EXEC_INVALID');
+        assert.match(error.message,/standalone argv/);
+        assert.match(error.message,/BRIDGE_(ASSET|EXPORT)_0/);
+        return true;
+      });
+      // Parsing old request data must remain possible for evidence recovery.
+      assert.deepEqual(validateDirectExecRequest(req),req);
+      await assert.rejects(executeDirectExec({request:req,hostPolicy:s.hostPolicy}),{code:'DIRECT_EXEC_INVALID'});
+    }
+  } finally {s.cleanup();}
+});
+
+test('real Windows PowerShell copies staged binary input using the Host-provided environment', {skip:process.platform!=='win32'}, async()=>{
+  const s=setup();
+  try {
+    const bytes=Buffer.concat([Buffer.from('中文附件🙂\n'),Buffer.from([0,255,128])]);
+    const input=join(s.root,'中文 input.md');
+    writeFileSync(input,bytes);
+    const destination=join(s.root,'中文 result.md');
+    const result=await executeDirectExec({request:request({
+      argv:['powershell.exe','-NoProfile','-NonInteractive','-Command',
+        "$ErrorActionPreference='Stop'; [IO.File]::Copy($env:BRIDGE_ASSET_0,$env:BRIDGE_EXPORT_0,$false); [Console]::WriteLine('COPIED')"],
+      assets:[{assetId:'asset-12345678',fileName:'中文 input.md',mimeType:'text/markdown',sizeBytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')}],
+      exports:[{fileName:'中文 result.md',mimeType:'text/markdown',maxBytes:4096}]
+    }),hostPolicy:s.hostPolicy,assetPaths:[input],exportPaths:[destination]});
+    assert.equal(result.status,'SUCCEEDED');assert.equal(result.execution.exitCode,0);
+    assert.equal(result.evidence.stdout.trim(),'COPIED');
+    assert.deepEqual(readFileSync(destination),bytes);
+  } finally {s.cleanup();}
+});
 
 test('direct host policy is valid without repository entries', () => {
   const s = setup();

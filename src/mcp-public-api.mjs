@@ -1,4 +1,5 @@
 import {assertBridge} from './errors.mjs';
+import {assertDirectFileArgv} from './direct-exec.mjs';
 import {directWaitSeconds,waitForDirectResult} from './direct-run-wait.mjs';
 
 const REPOSITORY_FIELDS=['repository','targetRef','targetSha','expectedPolicySha'];
@@ -57,6 +58,7 @@ export async function invokePublicTool(gateway,toolName,args={}, {signal}={}){
     case 'bridge.resume_host':
       return call(gateway,'run',{mode:'host',host:args.hostId,enabled:toolName==='bridge.resume_host'});
     case 'bridge.run_host_command':{
+      assertDirectFileArgv(args.argv);
       const seconds=directWaitSeconds({mode:'direct',...pick(args,['waitSeconds'])});
       const receipt=await call(gateway,'run',{mode:'direct',host:args.hostId,...pick(args,DIRECT_FIELDS)});
       return seconds===0?receipt:waitForDirectResult(gateway,receipt,seconds,{signal});
