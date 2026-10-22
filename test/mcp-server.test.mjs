@@ -143,7 +143,7 @@ test('Streamable HTTP MCP lists execution tools plus bounded task transition',as
     'bridge.pause_host':[false,true,false],
     'bridge.resume_host':[false,true,false],
     'bridge.run_host_command':[false,true,true],
-    'bridge.import_file':[false,false,false],
+    'bridge.import_file':[false,false,true],
     'bridge.create_file_upload':[false,false,false],
     'bridge.delete_file':[false,true,false],
     'bridge.get_repository_configuration':[true,false,false],

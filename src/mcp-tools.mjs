@@ -199,7 +199,7 @@ export const MCP_TOOL_DEFINITIONS = [
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,
-      "openWorldHint": false
+      "openWorldHint": true
     },
     "inputSchema": {
       "type": "object",
