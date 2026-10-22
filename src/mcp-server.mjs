@@ -24,6 +24,10 @@ function expiredExport(item,now) {
     Number.isFinite(item.expiresAt) && item.expiresAt<=now;
 }
 
+function expiryInstant(value) {
+  return Number.isSafeInteger(value) && value>=0 && value<=8_640_000_000_000_000;
+}
+
 async function assetLinks(value,gateway,clock) {
   const candidates=[];
   const directResult=value?.kind==='direct' && value?.transport==='direct' && Array.isArray(value.exports);
@@ -31,7 +35,7 @@ async function assetLinks(value,gateway,clock) {
     typeof value.assetId==='string' && value.status==='READY') candidates.push(value);
   if(directResult) candidates.push(...value.exports.filter(item=>
     item?.kind==='asset' && item?.transport==='direct-asset' && item?.status==='READY'));
-  const seen=new Set(),expired=new Set(),links=[];
+  const seen=new Set(),expired=new Set(),links=[],downloads=new Map(),prepared=[];
   const isExpired=item=>directResult && expiredExport(item,clock());
   for(const item of candidates) {
     if(!item || typeof item.assetId!=='string')continue;
@@ -51,31 +55,68 @@ async function assetLinks(value,gateway,clock) {
       expired.add(item);continue;
     }
     if(isExpired(item)){expired.add(item);continue;}
+    prepared.push({item,issued});
+  }
+  // A later file's awaited authorization can outlive an earlier file or access
+  // capability. Finalize all links from one post-await time snapshot, without
+  // reissuing access or repeating an authorization query.
+  const now=clock();
+  for(const item of candidates)if(expiredExport(item,now))expired.add(item);
+  for(const {item,issued} of prepared) {
+    if(expired.has(item))continue;
+    // Access capabilities expire independently of the retained object. Keep
+    // issuer metadata separate; never derive a missing deadline from retention
+    // or the service's current default TTL.
+    const accessExpiry=expiryInstant(issued.expiresAt)?issued.expiresAt:null;
+    if(accessExpiry!==null) {
+      const accessExpired=accessExpiry<=now;
+      downloads.set(item.assetId,{downloadExpiresAt:accessExpiry,
+        ...(accessExpired?{downloadAvailability:'expired'}:{})});
+      if(accessExpired)continue;
+    }
+    const accessDescription=accessExpiry===null
+      ? 'Download access expiry is unavailable; do not infer it from file retention.'
+      : `Download access expires at ${new Date(accessExpiry).toISOString()}.`;
+    const retentionDescription=item.persistent===true
+      ? 'This legacy persistent file has no automatic retention expiry.'
+      : item.persistent===false && expiryInstant(item.expiresAt)
+        ? `File retention expires at ${new Date(item.expiresAt).toISOString()}; this is separate from download access.`
+        : 'File retention expiry is unavailable.';
     links.push({
       type:'resource_link',
       uri:issued.uri,
       name:typeof item.fileName==='string' ? item.fileName : item.assetId,
       ...(typeof item.mimeType==='string' ? {mimeType:item.mimeType} : {}),
       ...(Number.isInteger(item.sizeBytes) && item.sizeBytes>=0 ? {size:item.sizeBytes} : {}),
-      description:'Short-lived access to a principal-owned Bridge file stored in private R2'
+      description:`Principal-owned Bridge file stored in private R2. ${accessDescription} ${retentionDescription} Earlier file expiry, deletion or revoked access can prevent download.`
     });
   }
-  return {links,expired};
+  return {links,expired,downloads};
 }
 
 async function successResult(value,gateway,toolName,clock) {
   // File delivery is an explicit result read, separate from submitting native
   // file parameters or polling metadata. Run authorization has already passed.
-  const {links,expired}=toolName==='bridge.get_result'
-    ? await assetLinks(value,gateway,clock) : {links:[],expired:new Set()};
-  if(expired.size) {
-    // Keep the durable READY history intact, even after asset metadata is pruned.
-    value={...value,exports:value.exports.map(item=>expired.has(item) ? {...item,availability:'expired'} : item)};
+  const {links,expired,downloads}=toolName==='bridge.get_result'
+    ? await assetLinks(value,gateway,clock) : {links:[],expired:new Set(),downloads:new Map()};
+  if(expired.size || downloads.size) {
+    // Presentation-only additions must not mutate durable READY history or
+    // reinterpret its existing expiresAt (the file's retention deadline).
+    const annotate=item=>{
+      const download=item?.kind==='asset' && item?.transport==='direct-asset'
+        ? downloads.get(item.assetId) : null;
+      return expired.has(item) || download
+        ? {...item,...download,...(expired.has(item)?{availability:'expired'}:{})} : item;
+    };
+    value=value?.kind==='direct' && Array.isArray(value.exports)
+      ? {...value,exports:value.exports.map(annotate)} : annotate(value);
   }
   return {
     content: [
       { type: 'text', text: JSON.stringify(value) },
       ...(expired.size ? [{type:'text',text:'One or more temporary output files have expired. Their receipts and command output remain available; expired files have no download link.'}] : []),
+      ...([...downloads.values()].some(item=>item.downloadAvailability==='expired')
+        ? [{type:'text',text:'One or more download access links expired before this response. File retention is separate; retained command evidence is unchanged. Read this result again for fresh access if the file is still retained.'}] : []),
       ...links
     ],
     structuredContent: value

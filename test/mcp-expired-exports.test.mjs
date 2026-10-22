@@ -49,7 +49,7 @@ test('MCP preserves command evidence and mixed receipts after expiry and metadat
   const after=await f.read();assert.equal(after.isError,undefined);
   assert.equal(after.structuredContent.evidence.stdout,f.result.evidence.stdout);
   assert.deepEqual(after.structuredContent.exports[0],{...f.short,availability:'expired'});
-  assert.deepEqual(after.structuredContent.exports.slice(1),[f.long,f.legacy]);
+  assert.deepEqual(after.structuredContent.exports.slice(1),[f.long,f.legacy].map(item=>({...item,downloadExpiresAt:f.short.expiresAt+10000})));
   assert.equal(after.content.filter(item=>item.type==='resource_link').length,2);
   assert.deepEqual(f.issued,[f.long.assetId,f.legacy.assetId]);
   assert.equal(after.content.filter(item=>item.type==='text').length,2);

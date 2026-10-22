@@ -382,6 +382,7 @@ test('task transition requires a resolved task session and strips the opaque tok
 
 test('MCP advertises ChatGPT fileParams and returns principal-bound file resources',async t=>{
   const transport=new FakeTransport();
+  const now=2_100_000_000_000,downloadExpiresAt=now+900_000;
   const principal={bridgeUserId:'bridge-user-1',externalProvider:'test',externalSubject:'subject'};
   const payload=Buffer.from('native-file-bytes','utf8');
   let receipt;
@@ -415,7 +416,7 @@ test('MCP advertises ChatGPT fileParams and returns principal-bound file resourc
       return {
         asset:{assetId},
         uri:'bridge-file:///access/test-capability-1234',
-        expiresAt:123456789
+        expiresAt:downloadExpiresAt
       };
     },
     async readResource({principal:seen,token}) {
@@ -434,7 +435,7 @@ test('MCP advertises ChatGPT fileParams and returns principal-bound file resourc
     }
   };
   const gateway=new BridgeGateway({transport,directAssets,principal});
-  const handler=createBridgeMcpHandler({gateway});
+  const handler=createBridgeMcpHandler({gateway,clock:()=>now});
   const client=await connectInProcess(t,handler);
 
   const listed=await client.listTools();
@@ -469,7 +470,7 @@ test('MCP advertises ChatGPT fileParams and returns principal-bound file resourc
   assert.equal(polled.content.some(item=>item.type==='resource_link'),false);
   assert.equal(resourcesIssued,0);
   const result=await client.callTool({name:'bridge.get_result',arguments:{runId:receipt.runId}});
-  assert.deepEqual(result.structuredContent,receipt);
+  assert.deepEqual(result.structuredContent,{...receipt,downloadExpiresAt});
   assert.equal(resourcesIssued,1);
   const link=result.content.find(item=>item.type==='resource_link');
   assert.ok(link);
