@@ -195,7 +195,7 @@ export const MCP_TOOL_DEFINITIONS = [
   {
     "name": "bridge.import_file",
     "title": "Import an attached file",
-    "description": "Import one actual ChatGPT attachment through the native file parameter into the authenticated account's temporary private transfer store. Use its returned asset ID as a managed Host input. Only approved native file-delivery hosts are accepted. Files are at most 25 MiB; native imports normally expire after 24 hours. Use the returned expiry and never invent a download URL.",
+    "description": "Import one actual ChatGPT attachment through the native file parameter into the authenticated account's temporary private transfer store. Use its returned asset ID as a managed Host input. Public HTTPS file-delivery domains need no per-domain configuration; private network targets, URL credentials and nonstandard ports are rejected. Files are at most 25 MiB; native imports normally expire after 24 hours. Use the returned expiry and never invent a download URL.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,

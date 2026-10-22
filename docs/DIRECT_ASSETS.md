@@ -211,7 +211,7 @@ expansion is not supported. Staged paths are also exposed as
 - maximum 8 input assets and 8 output slots per Direct Run;
 - exact size + SHA-256 verification at ingress, host staging, export and
   principal resource read;
-- native import URLs are HTTPS and host-allowlisted;
+- native import URLs use public HTTPS on port 443, with no per-domain allowlist;
 - input download authorization binds runner token + host + live lease + run +
   declared input asset;
 - export authorization binds runner token + host + live lease + run + declared
@@ -257,14 +257,27 @@ DIRECT_ASSETS -> bridge-direct-assets
 Apply D1 migrations before the new Worker so the `persistent`,
 `source_kind`, and `source_ref` columns exist.
 
-Optional configuration:
+Native attachment delivery domains require no configuration. The retired
+`BRIDGE_FILE_IMPORT_HOSTS` binding is no longer read. This avoids breaking uploads
+when ChatGPT delivers a file from a new regional storage hostname.
 
-```text
-BRIDGE_FILE_IMPORT_HOSTS=files.oaiusercontent.com,files.openai.com
-```
+Imports use authenticated account ownership and the native file parameter. Each
+request and redirect must use credential-free HTTPS on port 443. IP literals,
+localhost, single-label and local/internal DNS names are refused before fetching;
+size, transfer deadline and redirect count remain bounded.
+No Bridge bearer token, browser cookie or caller headers are forwarded.
 
-Use this only to narrow or deliberately extend the trusted file-delivery host
-set. Do not use it as a general URL-fetch allowlist.
+DNS/IP isolation is provided by the Cloudflare Workers public outbound network,
+including DNS results, and `global_fetch_strictly_public` prevents same-zone origin
+bypass. Keep that compatibility flag enabled and imports on global public fetch,
+never a private/VPC/service binding. A custom `fetchImpl` outside this deployment
+must provide equivalent network-level isolation: URL syntax checks alone do not
+stop DNS rebinding. The Node-hosted server does not instantiate this Worker asset
+service. Unit fixtures check URL/redirect policy, not real DNS or native delivery.
+
+Runtime references: [Workers public fetch routing](https://developers.cloudflare.com/workers/configuration/compatibility-flags/#global-fetch-strictly-public),
+[workerd outbound network/DNS filtering](https://github.com/cloudflare/workerd/blob/main/src/workerd/server/workerd.capnp),
+and [Cloudflare/standalone compatibility scope](https://github.com/cloudflare/workerd/blob/main/src/workerd/io/compatibility-date.capnp).
 
 
 ### Buffered transfers and retired object generations
