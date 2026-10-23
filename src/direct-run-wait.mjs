@@ -1,17 +1,33 @@
-import { assertBridge } from './errors.mjs';
+import {assertBridge} from './errors.mjs';
 
-export const MAX_DIRECT_WAIT_SECONDS=10;
-const DEFAULT_DIRECT_WAIT_SECONDS=10;
+export const MAX_DIRECT_WAIT_SECONDS=20;
+export const MAX_DIRECT_RESPONSE_SECONDS=120;
+const DEFAULT_DIRECT_WAIT_SECONDS=20;
+const DEFAULT_QUEUE_WAIT_SECONDS=75;
+const DEFAULT_TRANSFER_WAIT_SECONDS=60;
 const TERMINAL=new Set(['SUCCEEDED','FAILED','CANCELED']);
+const PHASES={PREPARING:'input_transfer',EXECUTING:'execution',RETURNING_RESULT:'output_transfer'};
 const POLL_INTERVAL_MS=1000;
 
-export function directWaitSeconds(args) {
-  if(args?.waitSeconds===undefined)return args?.mode==='direct' ? DEFAULT_DIRECT_WAIT_SECONDS : 0;
-  assertBridge(args.mode==='direct' && Number.isInteger(args.waitSeconds) &&
-    args.waitSeconds>=0 && args.waitSeconds<=MAX_DIRECT_WAIT_SECONDS,
-    'INVALID_GATEWAY_REQUEST','waitSeconds is supported only for Direct Exec, as an integer from 0 to 10');
-  return args.waitSeconds;
+function budget(value,fallback,max,name) {
+  const seconds=value===undefined?fallback:value;
+  assertBridge(Number.isInteger(seconds)&&seconds>=0&&seconds<=max,
+    'INVALID_GATEWAY_REQUEST',`${name} must be an integer from 0 to ${max}`);
+  return seconds;
 }
+
+export function directWaitSettings(args) {
+  const fields=['waitSeconds','queueWaitSeconds','transferWaitSeconds'];
+  assertBridge(args?.mode==='direct'||fields.every(key=>args?.[key]===undefined),
+    'INVALID_GATEWAY_REQUEST','Response wait options are supported only for Direct Exec');
+  return {
+    seconds:budget(args?.waitSeconds,args?.mode==='direct'?DEFAULT_DIRECT_WAIT_SECONDS:0,MAX_DIRECT_WAIT_SECONDS,'waitSeconds'),
+    queueWaitSeconds:budget(args?.queueWaitSeconds,DEFAULT_QUEUE_WAIT_SECONDS,MAX_DIRECT_RESPONSE_SECONDS,'queueWaitSeconds'),
+    transferWaitSeconds:budget(args?.transferWaitSeconds,DEFAULT_TRANSFER_WAIT_SECONDS,MAX_DIRECT_RESPONSE_SECONDS,'transferWaitSeconds')
+  };
+}
+
+export const directWaitSeconds=args=>directWaitSettings(args).seconds;
 
 function pause(ms,signal) {
   return new Promise(resolve=>{
@@ -31,8 +47,6 @@ async function boundedRead(operation,remaining,signal) {
     onAbort=()=>resolve({state:'interrupted'});
     signal?.addEventListener('abort',onAbort,{once:true});
   });
-  // A provider read cannot necessarily be canceled. Observe its late rejection
-  // without exposing late output or issuing more reads after this wait ends.
   const read=Promise.resolve().then(operation).then(
     value=>({state:'value',value}),()=>({state:'unavailable'})
   );
@@ -40,44 +54,68 @@ async function boundedRead(operation,remaining,signal) {
   finally{clearTimeout(timer);signal?.removeEventListener('abort',onAbort);}
 }
 
-// Wait above the gateway decorators: commercial admission must bind the Run
-// before a Host can claim it. Reads reuse the same principal-scoped gateway.
-// A canceled HTTP wait never cancels or re-submits the durable execution.
+// Wait above admission/billing: reads are scoped to the same principal and Run.
+// Ending this response never cancels or re-submits its durable execution.
 export async function waitForDirectResult(gateway,receipt,seconds,{
-  signal,clock=()=>performance.now(),delay=pause
+  signal,clock=()=>performance.now(),wallClock=()=>Date.now(),delay=pause,
+  queueWaitSeconds=DEFAULT_QUEUE_WAIT_SECONDS,transferWaitSeconds=DEFAULT_TRANSFER_WAIT_SECONDS
 }={}) {
-  assertBridge(Number.isInteger(seconds)&&seconds>=0&&seconds<=MAX_DIRECT_WAIT_SECONDS,
-    'INVALID_GATEWAY_REQUEST','Invalid Direct wait window');
+  const settings=directWaitSettings({mode:'direct',waitSeconds:seconds,queueWaitSeconds,transferWaitSeconds});
   if(seconds===0)return receipt;
-  let latest=receipt;
-  const deadline=clock()+seconds*1000;
-  // A fixed read budget also bounds work if a clock stalls or moves backwards.
-  for(let read=0;read<=MAX_DIRECT_WAIT_SECONDS;read++) {
-    if(signal?.aborted)return {...latest,waitStatus:'interrupted'};
+  let latest=receipt,phase='queue',highestPhase=0;
+  const started=clock(),totalDeadline=started+MAX_DIRECT_RESPONSE_SECONDS*1000;
+  const deadlines={queue:started+settings.queueWaitSeconds*1000};
+  const phaseDeadline=()=>deadlines[phase==='awaiting_start'?'queue':phase]??totalDeadline;
+  const remaining=()=>Math.min(totalDeadline,phaseDeadline())-clock();
+  const stop=state=>({...latest,waitStatus:state,waitPhase:clock()>=totalDeadline?'total':phase});
+  // Fixed work bound also handles stalled/backwards test or platform clocks.
+  for(let read=0;read<=MAX_DIRECT_RESPONSE_SECONDS;read++) {
+    if(signal?.aborted)return stop('interrupted');
     try {
-      const state=await boundedRead(()=>gateway.getRun({runId:receipt.runId}),deadline-clock(),signal);
-      if(state.state!=='value')return {...latest,waitStatus:state.state};
+      // One final read at a stage boundary observes transitions that occurred
+      // between polls. It has its own one-second read cap, never extra total time.
+      const readBudget=remaining()>0?remaining():Math.min(POLL_INTERVAL_MS,totalDeadline-clock());
+      const state=await boundedRead(()=>gateway.getRun({runId:receipt.runId}),readBudget,signal);
+      if(state.state!=='value')return stop(state.state);
       const run=state.value;
       assertBridge(run?.runId===receipt.runId,'RUN_NOT_FOUND','Waited Run identity changed');
-      if(signal?.aborted)return {...latest,waitStatus:'interrupted'};
+      if(signal?.aborted)return stop('interrupted');
+      assertBridge(['QUEUED','RUNNING',...TERMINAL].includes(run.status),
+        'RESULT_NOT_READY','Invalid Direct Run status');
       latest={...receipt,status:run.status};
       if(TERMINAL.has(run.status)) {
-        const evidence=await boundedRead(()=>gateway.getResult({runId:receipt.runId}),deadline-clock(),signal);
-        if(evidence.state!=='value')return {...latest,waitStatus:evidence.state};
+        // Evidence has a separate transfer budget but cannot reset total time.
+        phase='result';deadlines.result??=Math.min(deadlines.output_transfer??Infinity,clock()+settings.transferWaitSeconds*1000);
+        const evidence=await boundedRead(()=>gateway.getResult({runId:receipt.runId}),remaining(),signal);
+        if(evidence.state!=='value')return stop(evidence.state);
         const result=evidence.value;
-        assertBridge(result?.runId===receipt.runId && result.status===run.status,
+        assertBridge(result?.runId===receipt.runId&&result.status===run.status,
           'RESULT_NOT_READY','Waited result is not available');
-        if(signal?.aborted)return {...latest,waitStatus:'interrupted'};
+        if(signal?.aborted)return stop('interrupted');
         return {...receipt,...result};
       }
+      if(run.progress) {
+        const p=run.progress,next=PHASES[p.phase],rank=Object.keys(PHASES).indexOf(p.phase)+1;
+        assertBridge(next&&rank>=highestPhase&&Number.isSafeInteger(p.executionElapsedMs)&&p.executionElapsedMs>=0&&p.executionElapsedMs<=3_700_000&&
+          Number.isSafeInteger(p.reportedAt)&&Number.isSafeInteger(p.phaseStartedAt)&&p.phaseStartedAt>=0&&p.phaseStartedAt<=p.reportedAt,
+          'DIRECT_RUN_PROGRESS_INVALID','Invalid Direct Run progress');
+        latest.progress={phase:p.phase,executionElapsedMs:p.executionElapsedMs,reportedAt:p.reportedAt,phaseStartedAt:p.phaseStartedAt};
+        highestPhase=rank;phase=next;
+        const observed=clock(),wall=wallClock();
+        const elapsed=phase==='execution'?p.executionElapsedMs+Math.max(0,wall-p.reportedAt):Math.max(0,wall-p.phaseStartedAt);
+        const limit=phase==='execution'?seconds:settings.transferWaitSeconds;
+        // Repeated reports can shorten a deadline, never restart a stage.
+        deadlines[phase]=Math.min(deadlines[phase]??Infinity,observed+Math.max(0,limit*1000-elapsed));
+      } else if(!highestPhase) {
+        // Claim time is not spawn time, including for older Hosts.
+        phase=run.status==='RUNNING'?'awaiting_start':'queue';
+      }
     } catch {
-      // Preserve the admitted identity on a read/authorization failure. Do not
-      // disclose output, internal errors or invite submission of a second Run.
-      return {...latest,waitStatus:'unavailable'};
+      return stop('unavailable');
     }
-    const remaining=deadline-clock();
-    if(remaining<=0 || read===MAX_DIRECT_WAIT_SECONDS)return {...latest,waitStatus:'timed_out'};
-    await delay(Math.min(POLL_INTERVAL_MS,remaining),signal);
+    const left=remaining();
+    if(left<=0||read===MAX_DIRECT_RESPONSE_SECONDS)return stop('timed_out');
+    await delay(Math.min(POLL_INTERVAL_MS,left),signal);
   }
-  return latest;
+  return stop('timed_out');
 }

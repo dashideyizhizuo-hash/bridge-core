@@ -8,8 +8,8 @@ import { D1DirectExecStore } from '../src/cloudflare/d1-direct-exec-store.mjs';
 const receipt={runId:'dx1:host-a:direct-wait-0001',hostId:'host-a',kind:'direct',transport:'direct',status:'QUEUED'};
 const result={...receipt,status:'SUCCEEDED',evidence:{stdout:'中文\n',stderr:''}};
 function timing() {let now=0;return {clock:()=>now,delay:async ms=>{now+=ms;}};}
-test('only Direct calls default to ten seconds; explicit zero opts out',()=>{
-  assert.equal(directWaitSeconds({mode:'direct'}),10);
+test('only Direct calls default to twenty seconds; explicit zero opts out',()=>{
+  assert.equal(directWaitSeconds({mode:'direct'}),20);
   assert.equal(directWaitSeconds({mode:'direct',waitSeconds:0}),0);
   assert.equal(directWaitSeconds({mode:'direct',waitSeconds:3}),3);
   for(const mode of ['host','connect','asset','capability','edit','batch','billing'])
@@ -26,8 +26,8 @@ test('bounded polling returns a late result, including failures and cancellation
 });
 test('wait has a fixed read budget even with a stalled clock',async()=>{
   let reads=0;const gateway={getRun:async()=>{reads++;return receipt;},getResult:async()=>{throw Error('must not read');}};
-  assert.deepEqual(await waitForDirectResult(gateway,receipt,10,{clock:()=>0,delay:async()=>{}}),{...receipt,waitStatus:'timed_out'});
-  assert.equal(reads,11);
+  assert.deepEqual(await waitForDirectResult(gateway,receipt,10,{clock:()=>0,delay:async()=>{}}),{...receipt,waitStatus:'timed_out',waitPhase:'queue'});
+  assert.equal(reads,121);
 });
 for(const phase of ['state','result'])for(const abort of [false,true])
 test(`in-flight ${phase} read is bounded by ${abort?'disconnect':'deadline'} with no late output`,async t=>{
@@ -38,7 +38,7 @@ test(`in-flight ${phase} read is bounded by ${abort?'disconnect':'deadline'} wit
   const pending=new Promise((resolve,reject)=>{rejectRead=reject;});
   const blockedRead=()=>{reads++;entered();return pending;};
   const gateway={getRun:async()=>phase==='state'?blockedRead():{...receipt,status:'SUCCEEDED'},getResult:blockedRead};
-  const waiting=waitForDirectResult(gateway,receipt,1,{signal:cancellation.signal,clock:()=>now})
+  const waiting=waitForDirectResult(gateway,receipt,1,{signal:cancellation.signal,clock:()=>now,queueWaitSeconds:1,transferWaitSeconds:1})
     .then(value=>{settled=true;return value;});
   await inFlight;
   if(abort) {
@@ -82,7 +82,7 @@ test('read errors and inconsistent identities retain admitted receipt without ex
 test('each wait read uses actual SQLite owner isolation; no foreign result is returned',async t=>{
   const sql=new DatabaseSync(':memory:');t.after(()=>sql.close());
   sql.exec("PRAGMA foreign_keys=ON;CREATE TABLE bridge_users(id TEXT PRIMARY KEY);INSERT INTO bridge_users VALUES('a'),('b');");
-  for(const name of ['0009_direct_exec.sql','0010_direct_exec_hardening.sql'])sql.exec(readFileSync(new URL('../migrations/'+name,import.meta.url),'utf8'));
+  for(const name of ['0009_direct_exec.sql','0010_direct_exec_hardening.sql','0039_direct_run_progress.sql'])sql.exec(readFileSync(new URL('../migrations/'+name,import.meta.url),'utf8'));
   const db={batch:async()=>{throw Error('read-only fixture');},prepare(query){return {bind(...args){return {first:async()=>sql.prepare(query).get(...args)??null};}};}};
   sql.prepare('INSERT INTO direct_hosts(host_id,bridge_user_id,runner_token_sha256,created_at,updated_at) VALUES(?,?,?,?,?)').run('host-a','a','a'.repeat(64),1,1);
   sql.prepare('INSERT INTO direct_runs(request_id,run_id,bridge_user_id,host_id,request_json,status,result_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)')

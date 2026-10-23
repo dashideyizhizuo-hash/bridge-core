@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
+import { readFileSync } from 'node:fs';
 import {
   Client,
   StreamableHTTPClientTransport
@@ -501,13 +503,15 @@ function createApp({
   taskSessionStore,
   activationRandomUUID=()=>'provider-fixed-uuid',
   gatewayFactory,
+  envOverrides={},
   directFetch=async()=>{ throw new Error('unexpected direct GitHub fetch'); }
 }={}) {
   const env=baseEnv({
     __oauthHelpers:helpers,
     __tokenProps:{
       bridgePrincipal:store.principal
-    }
+    },
+    ...envOverrides
   });
   const app=createCloudflareBridgeOAuthProvider({
     env,
@@ -1232,6 +1236,35 @@ test('readyz compiles the deployed Direct schema instead of returning unconditio
   assert.equal(body.status,'ready');
   assert.equal(body.directAssets,false);
   assert.equal(body.directAdmin,false);
+});
+
+test('readyz requires all actual-execution progress columns with a zero-row schema probe',async t=>{
+  const progressMigration=readFileSync(new URL('../migrations/0039_direct_run_progress.sql',import.meta.url),'utf8');
+  function fixture(){
+    const native=new DatabaseSync(':memory:');t.after(()=>native.close());
+    native.exec('CREATE TABLE bridge_users(id TEXT PRIMARY KEY)');
+    for(const file of ['0009_direct_exec.sql','0010_direct_exec_hardening.sql','0011_direct_assets.sql','0012_persistent_direct_assets.sql','0021_direct_asset_object_retirements.sql'])
+      native.exec(readFileSync(new URL('../migrations/'+file,import.meta.url),'utf8'));
+    const queries=[];
+    const db={prepare(sql){queries.push(sql);return {async first(){return native.prepare(sql).get()??null;}};},async batch(){return [];}};
+    const {app}=createApp({envOverrides:{DB:db}});
+    return {native,queries,request:()=>app.fetch(new Request(ISSUER+'/readyz'),{})};
+  }
+  const missing=fixture();
+  let response=await missing.request();
+  assert.equal(response.status,503);
+  assert.deepEqual(await response.json(),{status:'not-ready',reason:'schema'});
+  missing.native.exec(progressMigration);
+  response=await missing.request();assert.equal(response.status,200);
+  assert.deepEqual(await response.json(),{status:'ready',directAssets:false,directAdmin:false});
+  assert.ok(missing.queries.some(sql=>/SELECT progress_phase, execution_elapsed_ms, progress_reported_at, phase_started_at FROM direct_runs LIMIT 0/.test(sql)),
+    'readiness compiles the progress schema with a zero-row query');
+  for(const column of ['progress_phase','execution_elapsed_ms','progress_reported_at','phase_started_at'])await t.test('missing '+column,async()=>{
+    const partial=fixture();partial.native.exec(progressMigration);
+    partial.native.exec('ALTER TABLE direct_runs DROP COLUMN '+column);
+    const failed=await partial.request();assert.equal(failed.status,503);
+    assert.deepEqual(await failed.json(),{status:'not-ready',reason:'schema'});
+  });
 });
 
 for (const missingTable of ['direct_hosts','direct_asset_object_retirements'])

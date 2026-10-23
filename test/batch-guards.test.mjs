@@ -270,6 +270,7 @@ test('POSIX output overflow escalates at exactly two seconds after SIGTERM', { s
     .then(value => ({ value }), error => ({ error }))
     .then(outcome => { settled = true; return outcome; });
   try {
+    child.emit('spawn');
     child.stdout.emit('data', Buffer.alloc(5000, 'x'));
     assert.deepEqual(signals, [{ signal: 'SIGTERM', at: 0 }]);
     now = 1999; t.mock.timers.tick(1999);

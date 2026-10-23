@@ -1,5 +1,6 @@
 import { readBoundedText } from './request-body.mjs';
 import { BridgeError, errorEnvelope } from '../errors.mjs';
+import {validateDirectRunProgress} from '../direct-run-progress.mjs';
 
 export const DIRECT_RUNNER_CLAIM_PATH='/direct/runner/claim';
 export const DIRECT_RUNNER_HEARTBEAT_PATH='/direct/runner/heartbeat';
@@ -37,7 +38,7 @@ function statusFor(error,path) {
   // without the credential-failure daemon restart behavior.
   if(error?.code==='DIRECT_HOST_PAUSED') return path===DIRECT_RUNNER_CLAIM_PATH?423:409;
   if(error?.code==='DIRECT_RUN_STALE') return 409;
-  if(error?.code==='DIRECT_RUN_INVALID' || error?.code==='DIRECT_HOST_INVALID') return 400;
+  if(error?.code==='DIRECT_RUN_PROGRESS_INVALID' || error?.code==='DIRECT_RUN_INVALID' || error?.code==='DIRECT_HOST_INVALID') return 400;
   return 500;
 }
 
@@ -98,7 +99,8 @@ export function createDirectRunnerHandler({store,randomUUID=()=>globalThis.crypt
             runnerTokenSha256,
             leaseOwner:body.leaseOwner,
             runId:body.runId,
-            leaseMs:body.leaseMs
+            leaseMs:body.leaseMs,
+            ...(body.progress===undefined?{}:{progress:validateDirectRunProgress(body.progress)})
           });
           return Response.json(renewed,{headers:{'cache-control':'no-store'}});
         }
