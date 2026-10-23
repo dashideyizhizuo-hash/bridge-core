@@ -115,7 +115,9 @@ export async function waitForDirectResult(gateway,receipt,seconds,{
     }
     const left=remaining();
     if(left<=0||read===MAX_DIRECT_RESPONSE_SECONDS)return stop('timed_out');
-    await delay(Math.min(POLL_INTERVAL_MS,left),signal);
+    // Node truncates fractional delays; round up to avoid an early poll just
+    // before the final stage-boundary read.
+    await delay(Math.max(1,Math.ceil(Math.min(POLL_INTERVAL_MS,left))),signal);
   }
   return stop('timed_out');
 }
