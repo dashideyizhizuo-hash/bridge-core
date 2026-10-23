@@ -252,6 +252,10 @@ function startHeartbeat({
   arm(claimStartedAt);
   const tick=async nextProgress=>{
     if(stopped || busy || signal.aborted) return;
+    // Preserve in-flight authority/lease checks, but do not spend another RTT
+    // announcing a phase that finished while its message waited in the queue.
+    // The latest phase is still sent through this same authenticated endpoint.
+    if(progressEnabled && nextProgress && progress && nextProgress.phase!==progress.phase)return;
     busy=true;
     const sentAt=performance.now();
     // A phase can queue behind a slow prior heartbeat. Sample execution at
@@ -332,7 +336,6 @@ export async function runDirectRunnerOnce({
     leaseMs,heartbeatMs,controller,fetchImpl,onContact,claimStartedAt,
     progressVersion:claimed.progressVersion,initialProgress:claimed.progress,signal:lifecycleSignal});
   try {
-    heartbeat.progress({phase:'PREPARING',executionElapsedMs:0});
     if(journal.state==='COMPLETED') {
       result=journal.result;
       if(result.status==='SUCCEEDED' && (request.exports?.length ?? 0)>0) {
@@ -349,6 +352,9 @@ export async function runDirectRunnerOnce({
       try {
         lifecycleSignal.throwIfAborted();
         resolveDirectExecPlan({request,hostPolicy});
+        // Only real input files have an input-transfer phase. A normal argv
+        // command stays in unknown-start/queue until its successful OS spawn.
+        if((request.assets?.length ?? 0)>0)heartbeat.progress({phase:'PREPARING',executionElapsedMs:0});
         preparingAssets=true;
         const assetPaths=await stageDirectAssets({
           endpoint,
