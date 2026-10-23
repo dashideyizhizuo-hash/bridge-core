@@ -226,6 +226,10 @@ function ownerPaused(error) {
   return [403,409,423].includes(error?.status) && error?.code==='DIRECT_HOST_PAUSED';
 }
 
+function paymentHeld(error) {
+  return error?.status===402 && error?.code==='BILLING_PAYMENT_REQUIRED';
+}
+
 function startHeartbeat({
   endpoint,hostId,token,leaseOwner,runId,leaseMs,heartbeatMs,
   controller,fetchImpl,onContact,claimStartedAt,progressVersion,initialProgress,signal:runnerSignal
@@ -519,6 +523,15 @@ export async function runDirectRunnerLoop({
         // without process restart. Bad/rotated credentials still fail closed.
         onContact();backoffMs=1_000;
         if(once)return {status:'PAUSED',hostId:hostPolicy.host.id};
+        await pause(Math.max(pollMs,60_000));
+        continue;
+      }
+      if(paymentHeld(error)) {
+        // A known payment/tariff hold needs owner action, not rapid network
+        // retries. Keep presence, but re-authenticate every later claim; never
+        // treat other402 responses or an old hold as execution authority.
+        onContact();backoffMs=1_000;onError(error);
+        if(once)throw error;
         await pause(Math.max(pollMs,60_000));
         continue;
       }
