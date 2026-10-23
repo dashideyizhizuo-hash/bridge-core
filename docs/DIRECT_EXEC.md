@@ -249,11 +249,11 @@ The long-lived host runner is expected to run under systemd using `examples/brid
 
 The runner uses:
 
-- idle polling that backs off from 5 to 10 to 15 seconds by default;
+- idle polling that backs off from 15 to 30 to 60 seconds by default;
 - a short 90 second claim lease;
 - a 20 second active-command heartbeat;
 - exponential retry backoff for transient Cloudflare/network failures;
-- immediate fatal stop for runner authentication/host-disable failures;
+- fatal stop for revoked runner authentication; owner pause cancels active work and keeps the runner available for resume;
 - a local 0700/0600 execution journal;
 - bounded local journal retention.
 
@@ -267,17 +267,19 @@ Therefore:
 - if heartbeat authority is revoked, the runner aborts the full process group;
 - if heartbeat connectivity is lost close to lease expiry, the runner aborts locally before a safe cloud reclaim could overlap it.
 
-Consecutive empty claims increase the wait by the configured poll interval, up
-to 15 seconds (an explicitly configured interval above 15 seconds stays at that
-interval). Completing a Run triggers the next claim immediately and resets the
-next idle wait to the base interval. Network-error backoff remains separate;
-every claim still authenticates the runner, and active-command heartbeats stay
-at 20 seconds. Cancellation interrupts an idle wait immediately. This is a
-bounded polling optimization, not push delivery: a newly queued command can
-wait up to the current idle interval plus request latency.
+Idle time since the last completed Run determines the polling interval: 15
+seconds for the first five minutes, 30 for the next five, then at most 60.
+Consecutive empty claims, Host-list views and task-status reads do not reset
+activity. Completing a Run triggers the next claim immediately and resets the
+next idle wait to 15 seconds. Network-error backoff remains separate; every
+claim authenticates the runner. Active-command heartbeats stay at 20 seconds,
+with immediate bounded progress reports at phase transitions. Cancellation
+interrupts an idle wait. This is outbound polling, not push delivery: a newly
+queued command can wait nearly one current interval plus request latency.
 
-For a continuously idle host at defaults, steady-state claim requests fall from
-approximately 720 to 240 per hour, a two-thirds reduction. Empty UPDATEs do not
+At the default 60-second steady idle interval, claim requests are approximately
+60 per hour (versus 240 per hour if the 15-second active interval stayed fixed).
+This is a request-count estimate, not measured provider cost. Empty UPDATEs do not
 imply rows were written; the estimate concerns requests and query invocations,
 not measured D1 billed writes. `last_seen_at` retains its existing 60-second
 write throttle. Cleanup migration `0022_direct_cleanup_indexes.sql` adds
