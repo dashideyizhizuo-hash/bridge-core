@@ -24,10 +24,11 @@ test('bounded polling returns a late result, including failures and cancellation
     assert.equal(reads,3);assert.equal(results,1);
   }
 });
-test('wait has a fixed read budget even with a stalled clock',async()=>{
-  let reads=0;const gateway={getRun:async()=>{reads++;return receipt;},getResult:async()=>{throw Error('must not read');}};
-  assert.deepEqual(await waitForDirectResult(gateway,receipt,10,{clock:()=>0,delay:async()=>{}}),{...receipt,waitStatus:'timed_out',waitPhase:'queue'});
-  assert.equal(reads,121);
+for(const [name,advance] of [['stalled',0],['backwards',-1],['barely advancing',0.01]])
+test(`a ${name} clock ends waiting without repeated state reads`,async()=>{
+  let now=0,reads=0,sleeps=0;const gateway={getRun:async()=>{reads++;return receipt;},getResult:async()=>{throw Error('must not read');}};
+  assert.deepEqual(await waitForDirectResult(gateway,receipt,10,{clock:()=>now,delay:async()=>{sleeps++;now+=advance;}}),{...receipt,waitStatus:'timed_out',waitPhase:'queue'});
+  assert.equal(reads,1);assert.ok(sleeps>=1&&sleeps<=64,'clock failure must not create an unbounded sleep loop');
 });
 for(const phase of ['state','result'])for(const abort of [false,true])
 test(`in-flight ${phase} read is bounded by ${abort?'disconnect':'deadline'} with no late output`,async t=>{

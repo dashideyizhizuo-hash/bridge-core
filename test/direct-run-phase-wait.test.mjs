@@ -44,6 +44,42 @@ test('queue timeout is independent and preserves the original task',async()=>{
   assert.equal(result.waitPhase,'queue');assert.equal(f.now,2_000);assert.equal(f.results,0);
 });
 
+test('fractional timer delays do not add an early poll before the final boundary read',async()=>{
+  let now=0;const reads=[],delays=[];
+  const result=await waitForDirectResult({
+    async getRun(){
+      reads.push(now);
+      if(reads.length===1)now+=0.25;
+      return {...receipt,status:'RUNNING'};
+    },
+    async getResult(){throw Error('Pending execution has no result');}
+  },receipt,1,{
+    queueWaitSeconds:1,clock:()=>now,wallClock:()=>EPOCH+now,
+    // Node truncates fractional timer delays and clamps zero to one millisecond.
+    delay:async ms=>{delays.push(ms);now+=Math.max(1,Math.floor(ms));}
+  });
+  assert.equal(result.runId,receipt.runId);assert.equal(result.status,'RUNNING');
+  assert.equal(result.waitStatus,'timed_out');assert.equal(result.waitPhase,'awaiting_start');
+  assert.equal(reads.length,2,JSON.stringify({reads,delays}));
+  assert.ok(reads[1]-reads[0]>=1000,'only the initial and final boundary reads are needed');
+});
+
+test('an early integer timer wake waits for the monotonic poll boundary before reading again',async()=>{
+  let now=0;const reads=[],delays=[];
+  const result=await waitForDirectResult({
+    async getRun(){reads.push(now);if(reads.length===1)now+=0.25;return {...receipt,status:'RUNNING'};},
+    async getResult(){throw Error('Pending execution has no result');}
+  },receipt,1,{
+    queueWaitSeconds:1,clock:()=>now,wallClock:()=>EPOCH+now,
+    // The timer and performance clocks can straddle a millisecond boundary.
+    delay:async ms=>{const first=delays.length===0;delays.push(ms);now+=first?ms-0.75:ms;}
+  });
+  assert.equal(result.runId,receipt.runId);assert.equal(result.status,'RUNNING');
+  assert.equal(result.waitStatus,'timed_out');assert.equal(result.waitPhase,'awaiting_start');
+  assert.equal(reads.length,2,JSON.stringify({reads,delays}));
+  assert.ok(reads[1]>=1000,'an early wake must not trigger a pre-boundary read');
+});
+
 test('input preparation has its own response wait budget',async()=>{
   const f=fixture(now=>now<1_000?{status:'QUEUED'}:{status:'RUNNING',progress:progress('PREPARING',now)});
   const result=await waitForDirectResult(f.gateway,receipt,20,{...f.options,transferWaitSeconds:2});

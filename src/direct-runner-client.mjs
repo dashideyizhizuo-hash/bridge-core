@@ -226,6 +226,10 @@ function ownerPaused(error) {
   return [403,409,423].includes(error?.status) && error?.code==='DIRECT_HOST_PAUSED';
 }
 
+function paymentHeld(error) {
+  return error?.status===402 && error?.code==='BILLING_PAYMENT_REQUIRED';
+}
+
 function startHeartbeat({
   endpoint,hostId,token,leaseOwner,runId,leaseMs,heartbeatMs,
   controller,fetchImpl,onContact,claimStartedAt,progressVersion,initialProgress,signal:runnerSignal
@@ -252,6 +256,10 @@ function startHeartbeat({
   arm(claimStartedAt);
   const tick=async nextProgress=>{
     if(stopped || busy || signal.aborted) return;
+    // Preserve in-flight authority/lease checks, but do not spend another RTT
+    // announcing a phase that finished while its message waited in the queue.
+    // The latest phase is still sent through this same authenticated endpoint.
+    if(progressEnabled && nextProgress && progress && nextProgress.phase!==progress.phase)return;
     busy=true;
     const sentAt=performance.now();
     // A phase can queue behind a slow prior heartbeat. Sample execution at
@@ -332,7 +340,6 @@ export async function runDirectRunnerOnce({
     leaseMs,heartbeatMs,controller,fetchImpl,onContact,claimStartedAt,
     progressVersion:claimed.progressVersion,initialProgress:claimed.progress,signal:lifecycleSignal});
   try {
-    heartbeat.progress({phase:'PREPARING',executionElapsedMs:0});
     if(journal.state==='COMPLETED') {
       result=journal.result;
       if(result.status==='SUCCEEDED' && (request.exports?.length ?? 0)>0) {
@@ -349,6 +356,9 @@ export async function runDirectRunnerOnce({
       try {
         lifecycleSignal.throwIfAborted();
         resolveDirectExecPlan({request,hostPolicy});
+        // Only real input files have an input-transfer phase. A normal argv
+        // command stays in unknown-start/queue until its successful OS spawn.
+        if((request.assets?.length ?? 0)>0)heartbeat.progress({phase:'PREPARING',executionElapsedMs:0});
         preparingAssets=true;
         const assetPaths=await stageDirectAssets({
           endpoint,
@@ -513,6 +523,15 @@ export async function runDirectRunnerLoop({
         // without process restart. Bad/rotated credentials still fail closed.
         onContact();backoffMs=1_000;
         if(once)return {status:'PAUSED',hostId:hostPolicy.host.id};
+        await pause(Math.max(pollMs,60_000));
+        continue;
+      }
+      if(paymentHeld(error)) {
+        // A known payment/tariff hold needs owner action, not rapid network
+        // retries. Keep presence, but re-authenticate every later claim; never
+        // treat other402 responses or an old hold as execution authority.
+        onContact();backoffMs=1_000;onError(error);
+        if(once)throw error;
         await pause(Math.max(pollMs,60_000));
         continue;
       }

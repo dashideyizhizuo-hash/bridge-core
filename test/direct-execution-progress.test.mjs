@@ -9,6 +9,7 @@ import childProcess from 'node:child_process';
 import {syncBuiltinESMExports} from 'node:module';
 import {EventEmitter} from 'node:events';
 import {performance} from 'node:perf_hooks';
+import {createServer} from 'node:http';
 import {makeTestDirectory} from './helpers/canonical-temp.mjs';
 import {D1DirectExecStore} from '../src/cloudflare/d1-direct-exec-store.mjs';
 import {createDirectRunnerHandler} from '../src/cloudflare/direct-runner-api.mjs';
@@ -167,7 +168,7 @@ test('negotiated progress never reports execution for spawn failure',async t=>{
       if(path.endsWith('/heartbeat')){progress.push(JSON.parse(init.body).progress);return Response.json({continue:true});}
       result=JSON.parse(init.body).result;return Response.json({status:result.status});}});
   assert.equal(outcome.status,'FAILED');assert.equal(result.error.code,'EXECUTION_FAILED');
-  assert.deepEqual(progress,[{phase:'PREPARING',executionElapsedMs:0},{phase:'RETURNING_RESULT',executionElapsedMs:0}]);
+  assert.deepEqual(progress,[{phase:'RETURNING_RESULT',executionElapsedMs:0}]);
 });
 test('revocation during immediate execution progress aborts child and prevents output return',async t=>{
   const root=makeTestDirectory(join(tmpdir(),'bridge-progress-cancel-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
@@ -196,18 +197,21 @@ test('revocation during immediate execution progress aborts child and prevents o
   assert.throws(()=>readFileSync(marker),{code:'ENOENT'});
   assert.throws(()=>process.kill(Number(readFileSync(pidFile,'utf8')),0),{code:'ESRCH'},'the real child must be terminated, not merely disconnected');
 });
-for(const finished of [false,true])test('queued execution report samples at actual send and freezes after close (finished '+finished+')',async t=>{
+for(const finished of [false,true])test('slow input progress keeps live execution timing but coalesces obsolete execution HTTP (finished '+finished+')',async t=>{
   const root=makeTestDirectory(join(tmpdir(),'bridge-progress-slow-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
   const marker=join(root,'spawned'),hostPolicyPath=join(root,'host.json'),stateDir=join(root,'state');
   const journal=join(stateDir,hostId,'progress-1234','result.json');
   writeFileSync(hostPolicyPath,JSON.stringify({version:1,host:{id:hostId},repositories:{},
     directExec:{enabled:true,serviceUser:userInfo().username,root,stateDir,maxSeconds:5,stdoutBytes:4096,stderrBytes:4096}}));
-  const reports=[];let completed;
+  const bytes=Buffer.from('input'),sha256=createHash('sha256').update(bytes).digest('hex');
+  const reports=[],calls=[];let completed;
   await runDirectRunnerOnce({endpoint:'https://bridge.example',token:'a'.repeat(40),hostPolicyPath,
-    fetchImpl:async(url,init)=>{const path=new URL(url).pathname;
+    fetchImpl:async(url,init)=>{const path=new URL(url).pathname;calls.push(path);
       if(path.endsWith('/claim'))return Response.json({runId:'dx1:host-main:progress-1234',leaseOwner,progressVersion:1,
         request:{schemaVersion:1,requestId:'progress-1234',hostId,argv:[process.execPath,'-e',
-          'require("fs").writeFileSync('+JSON.stringify(marker)+',"spawned");setTimeout(()=>console.log("done"),'+(finished?100:1200)+')']}});
+          'require("fs").writeFileSync('+JSON.stringify(marker)+',"spawned");setTimeout(()=>console.log("done"),'+(finished?100:1200)+')'],
+          assets:[{assetId:'asset-slow-input',fileName:'input.txt',mimeType:'text/plain',sizeBytes:bytes.length,sha256}]}});
+      if(path.includes('/assets/'))return new Response(bytes);
       if(path.endsWith('/heartbeat')){const p=JSON.parse(init.body).progress;reports.push(p);
         if(p.phase==='PREPARING'){
           const target=finished?journal:marker,deadline=Date.now()+5000;
@@ -218,8 +222,115 @@ for(const finished of [false,true])test('queued execution report samples at actu
         return Response.json({continue:true});}
       completed=JSON.parse(init.body).result;return Response.json({status:completed.status});}});
   const execution=reports.find(p=>p.phase==='EXECUTING'),returned=reports.find(p=>p.phase==='RETURNING_RESULT');
-  assert.ok(execution.executionElapsedMs>=100,'elapsed must include time queued behind the PREPARING report');
   assert.equal(returned.executionElapsedMs,completed.execution.durationMs);
-  if(finished)assert.equal(execution.executionElapsedMs,completed.execution.durationMs,'a late EXECUTING report must not include reporting/return time after close');
-  else assert.ok(execution.executionElapsedMs<completed.execution.durationMs);
+  if(finished){
+    assert.equal(execution,undefined,'already finished execution must not send an obsolete EXECUTING HTTP request');
+    assert.deepEqual(reports.map(p=>p.phase),['PREPARING','RETURNING_RESULT']);
+    assert.equal(calls.length,5,'claim, real input phase, asset GET, result phase and completion only');
+  }else{
+    assert.ok(execution.executionElapsedMs>=100,'elapsed must include time queued behind the PREPARING report');
+    assert.ok(execution.executionElapsedMs<completed.execution.durationMs);
+    assert.deepEqual(reports.map(p=>p.phase),['PREPARING','EXECUTING','RETURNING_RESULT']);
+    assert.equal(calls.length,6);
+  }
+});
+
+test('ordinary short command skips input phase, returns final phase, and replays without another execution',async t=>{
+  const root=makeTestDirectory(join(tmpdir(),'bridge-progress-cost-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
+  const marker=join(root,'executions'),hostPolicyPath=join(root,'host.json');
+  writeFileSync(hostPolicyPath,JSON.stringify({version:1,host:{id:hostId},repositories:{},
+    directExec:{enabled:true,serviceUser:userInfo().username,root,stateDir:join(root,'state'),maxSeconds:5,stdoutBytes:4096,stderrBytes:4096}}));
+  const request={schemaVersion:1,requestId:'progress-cost-1234',hostId,argv:[process.execPath,'-e',
+    'require("fs").appendFileSync('+JSON.stringify(marker)+',"x");console.log("done")']};
+  const calls=[],reports=[];let progress,result;
+  const fetchImpl=async(url,init)=>{const path=new URL(url).pathname;calls.push(path);
+    if(path.endsWith('/claim'))return Response.json({runId:'dx1:host-main:progress-cost-1234',leaseOwner,progressVersion:1,request,...(progress?{progress}:{})});
+    if(path.endsWith('/heartbeat')){const value=JSON.parse(init.body).progress;reports.push(value);
+      await new Promise(resolve=>setTimeout(resolve,100));progress={...value,phaseStartedAt:Date.now(),reportedAt:Date.now()};return Response.json({continue:true});}
+    if(path.endsWith('/complete')){result=JSON.parse(init.body).result;return Response.json({status:result.status});}
+    throw Error('ordinary command must not download or upload');};
+  assert.equal((await runDirectRunnerOnce({endpoint:'https://bridge.example',token:'a'.repeat(40),hostPolicyPath,fetchImpl})).status,'SUCCEEDED');
+  assert.deepEqual(reports.map(p=>p.phase),['EXECUTING','RETURNING_RESULT']);
+  assert.equal(calls.length,4,'one claim, two necessary phase updates and one complete; no PREPARING RTT');
+  assert.equal(reports.at(-1).executionElapsedMs,result.execution.durationMs);
+  const previousCalls=calls.length,previousReports=reports.length;
+  assert.equal((await runDirectRunnerOnce({endpoint:'https://bridge.example',token:'a'.repeat(40),hostPolicyPath,fetchImpl})).replayed,true);
+  assert.equal(readFileSync(marker,'utf8'),'x');
+  assert.equal(calls.length-previousCalls,2,'known RETURNING_RESULT replay needs only claim and authenticated complete');
+  assert.equal(reports.length,previousReports,'replay never regresses to input preparation or another execution');
+  progress=null;
+  const beforeLegacyReplayCalls=calls.length,beforeLegacyReplayReports=reports.length;
+  assert.equal((await runDirectRunnerOnce({endpoint:'https://bridge.example',token:'a'.repeat(40),hostPolicyPath,fetchImpl})).replayed,true);
+  assert.equal(calls.length-beforeLegacyReplayCalls,3,'a replay without persisted progress needs one result-phase notification, no preparing/execute');
+  assert.deepEqual(reports.slice(beforeLegacyReplayReports).map(p=>p.phase),['RETURNING_RESULT']);
+  assert.equal(readFileSync(marker,'utf8'),'x');
+});
+
+test('negotiated command retains the twenty-second heartbeat and revocation cancellation',async t=>{
+  const root=makeTestDirectory(join(tmpdir(),'bridge-progress-periodic-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
+  const pidFile=join(root,'child.pid'),hostPolicyPath=join(root,'host.json');
+  writeFileSync(hostPolicyPath,JSON.stringify({version:1,host:{id:hostId},repositories:{},
+    directExec:{enabled:true,serviceUser:userInfo().username,root,stateDir:join(root,'state'),maxSeconds:60,stdoutBytes:4096,stderrBytes:4096}}));
+  let count=0,firstAck=false,completed=false;const reports=[];
+  t.mock.timers.enable({apis:['setInterval']});
+  try{
+    const running=runDirectRunnerOnce({endpoint:'https://bridge.example',token:'a'.repeat(40),hostPolicyPath,
+      fetchImpl:async(url,init)=>{const path=new URL(url).pathname;
+        if(path.endsWith('/claim'))return Response.json({runId:'dx1:host-main:progress-periodic-1234',leaseOwner,progressVersion:1,
+          request:{schemaVersion:1,requestId:'progress-periodic-1234',hostId,argv:[process.execPath,'-e',
+            'require("fs").writeFileSync('+JSON.stringify(pidFile)+',String(process.pid));setInterval(()=>{},1000)']}});
+        if(path.endsWith('/heartbeat')){reports.push(JSON.parse(init.body).progress);count++;
+          if(count===1){firstAck=true;return Response.json({continue:true});}
+          return Response.json({error:{code:'DIRECT_RUN_STALE'}},{status:409});}
+        completed=true;throw Error('revoked command must not complete');}});
+    const rejected=assert.rejects(running,e=>e.status===409);
+    const deadline=Date.now()+5000;
+    while((!existsSync(pidFile)||!firstAck)&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,10));
+    assert.equal(existsSync(pidFile),true);assert.equal(firstAck,true);
+    t.mock.timers.tick(19_999);for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(count,1,'no periodic heartbeat before the original20s interval');
+    t.mock.timers.tick(1);await rejected;
+    assert.equal(count,2);assert.deepEqual(reports.map(p=>p.phase),['EXECUTING','EXECUTING']);
+    assert.equal(completed,false);assert.throws(()=>process.kill(Number(readFileSync(pidFile,'utf8')),0),{code:'ESRCH'});
+  }finally{t.mock.timers.reset();}
+});
+
+for(const withInput of [false,true])test('real loopback HTTP slow responses preserve one execution with fewer requests (input '+withInput+')',async t=>{
+  const root=makeTestDirectory(join(tmpdir(),'bridge-progress-http-')),stateDir=join(root,'state');
+  const hostPolicyPath=join(root,'host.json'),marker=join(root,'executions'),journal=join(stateDir,hostId,'progress-http-1234','result.json');
+  writeFileSync(hostPolicyPath,JSON.stringify({version:1,host:{id:hostId},repositories:{},
+    directExec:{enabled:true,serviceUser:userInfo().username,root,stateDir,maxSeconds:5,stdoutBytes:4096,stderrBytes:4096}}));
+  const bytes=Buffer.from('real HTTP input'),sha256=createHash('sha256').update(bytes).digest('hex');
+  const request={schemaVersion:1,requestId:'progress-http-1234',hostId,argv:[process.execPath,'-e',
+    'require("fs").appendFileSync('+JSON.stringify(marker)+',"x");console.log("done")'],
+    ...(withInput?{assets:[{assetId:'asset-http-input',fileName:'input.txt',mimeType:'text/plain',sizeBytes:bytes.length,sha256}]}:{})};
+  const calls=[],reports=[],serverErrors=[];let completed;
+  const server=createServer(async(req,res)=>{
+    try{
+      calls.push(req.url);assert.equal(req.headers.authorization,'Bearer '+'a'.repeat(40));
+      const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;assert.ok(size<=16384);chunks.push(chunk);}
+      const body=size?JSON.parse(Buffer.concat(chunks)):null;
+      const json=value=>{res.writeHead(200,{'content-type':'application/json','connection':'close'});res.end(JSON.stringify(value));};
+      if(req.url.endsWith('/claim'))return json({runId:'dx1:host-main:progress-http-1234',request,leaseOwner,progressVersion:1});
+      if(req.url.includes('/assets/')){res.writeHead(200,{'content-type':'text/plain','content-length':bytes.length,'connection':'close'});res.end(bytes);return;}
+      if(req.url.endsWith('/heartbeat')){
+        reports.push(body.progress);
+        if(body.progress.phase==='PREPARING'){
+          const deadline=Date.now()+5000;
+          while(!existsSync(journal)&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,10));
+          assert.equal(existsSync(journal),true);
+        }
+        await new Promise(resolve=>setTimeout(resolve,100));return json({continue:true});
+      }
+      if(req.url.endsWith('/complete')){completed=body.result;return json({status:completed.status});}
+      throw Error('unexpected local HTTP route');
+    }catch(error){serverErrors.push(error.name);if(!res.headersSent)res.writeHead(500);res.end('fixture failure');}
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(async()=>{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));rmSync(root,{recursive:true,force:true});});
+  const result=await runDirectRunnerOnce({endpoint:'http://127.0.0.1:'+server.address().port,token:'a'.repeat(40),hostPolicyPath});
+  assert.equal(result.status,'SUCCEEDED');assert.deepEqual(serverErrors,[]);assert.equal(readFileSync(marker,'utf8'),'x');
+  assert.deepEqual(reports.map(p=>p.phase),withInput?['PREPARING','RETURNING_RESULT']:['EXECUTING','RETURNING_RESULT']);
+  assert.equal(calls.length,withInput?5:4,'actual HTTP server request counts include claim, phase updates, optional asset GET and complete');
+  assert.equal(reports.at(-1).executionElapsedMs,completed.execution.durationMs);
 });

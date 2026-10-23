@@ -115,7 +115,17 @@ export async function waitForDirectResult(gateway,receipt,seconds,{
     }
     const left=remaining();
     if(left<=0||read===MAX_DIRECT_RESPONSE_SECONDS)return stop('timed_out');
-    await delay(Math.min(POLL_INTERVAL_MS,left),signal);
+    // Timer and monotonic clocks can straddle a millisecond boundary. An
+    // early wake must only finish sleeping, not trigger an extra state read.
+    const nextReadAt=Math.min(clock()+POLL_INTERVAL_MS,totalDeadline,phaseDeadline());
+    for(let wakes=0;clock()<nextReadAt;wakes++) {
+      if(signal?.aborted)return stop('interrupted');
+      if(wakes===64)return stop('timed_out');
+      const before=clock();
+      await delay(Math.max(1,Math.ceil(nextReadAt-before)),signal);
+      if(signal?.aborted)return stop('interrupted');
+      if(clock()<=before)return stop('timed_out');
+    }
   }
   return stop('timed_out');
 }
