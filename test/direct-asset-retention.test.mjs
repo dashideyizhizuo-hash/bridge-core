@@ -12,7 +12,7 @@ const DAY=86400000;
 function fixture(t) {
   const sql=new DatabaseSync(':memory:');t.after(()=>sql.close());
   sql.exec("CREATE TABLE bridge_users(id TEXT PRIMARY KEY); INSERT INTO bridge_users VALUES ('u')");
-  for(const file of ['0009_direct_exec.sql','0010_direct_exec_hardening.sql','0011_direct_assets.sql','0012_persistent_direct_assets.sql','0021_direct_asset_object_retirements.sql'])
+  for(const file of ['0009_direct_exec.sql','0010_direct_exec_hardening.sql','0039_direct_run_progress.sql','0011_direct_assets.sql','0012_persistent_direct_assets.sql','0021_direct_asset_object_retirements.sql'])
     sql.exec(readFileSync(new URL('../migrations/'+file,import.meta.url),'utf8'));
   const db={prepare(query){return {bind(...args){assert.ok(args.length<=100);return {
     run:async()=>sql.prepare(query).run(...args),first:async()=>sql.prepare(query).get(...args)??null,

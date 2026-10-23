@@ -53,7 +53,7 @@ test('independent non-command calls do not poll command state',async t=>{
 test('wait timeout returns the same running ID; a later result read never submits again',async t=>{
   const f=fixture();f.gateway.getRun=async()=>{f.calls.state++;return {...receipt,status:'RUNNING'};};
   const client=await clientFor(t,f.gateway);
-  const response=await client.callTool({name:'bridge.run_host_command',arguments:{hostId:'host-a',argv:['sleep','20'],waitSeconds:1}});
+  const response=await client.callTool({name:'bridge.run_host_command',arguments:{hostId:'host-a',argv:['sleep','20'],waitSeconds:1,queueWaitSeconds:1}});
   assert.equal(response.isError,undefined);assert.equal(response.structuredContent.runId,receipt.runId);
   assert.equal(response.structuredContent.status,'RUNNING');assert.ok(f.calls.state>=1&&f.calls.state<=2);
   const later=await client.callTool({name:'bridge.get_result',arguments:{runId:receipt.runId}});
@@ -62,7 +62,7 @@ test('wait timeout returns the same running ID; a later result read never submit
 test('invalid or non-Direct waits reject before any execution side effect',async t=>{
   const f=fixture(),client=await clientFor(t,f.gateway);
   for(const args of [
-    {mode:'direct',waitSeconds:11},{mode:'direct',waitSeconds:-1},{mode:'direct',waitSeconds:0.5},
+    {mode:'direct',waitSeconds:21},{mode:'direct',waitSeconds:-1},{mode:'direct',waitSeconds:0.5},
     {mode:'host',host:'host-a',enabled:false,waitSeconds:1},{mode:'asset',waitSeconds:0}
   ]) {
     const response=await client.callTool({name:'bridge.run_host_command',arguments:{hostId:'host-a',argv:['whoami'],...args}});

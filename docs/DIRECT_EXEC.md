@@ -19,27 +19,42 @@ GitHub-backed execution remains the engineering plane for source edits, trusted 
 
 ## Bounded result waiting
 
-Direct commands wait up to 10 seconds by default: call
-`bridge.run_host_command(hostId=<returned hostId>, argv=[...])`. A completed Run returns the same bounded
-evidence as `bridge.get_result` in that response. Set `waitSeconds: 0` for an
-immediate async receipt, or an integer from 1–10 for a shorter explicit window.
-The optional integer is bounded to 0–10 and applies
-only to Direct Exec; it does not change `timeoutSeconds` or Host execution limits.
+Direct commands default to a 20-second execution response window with
+`bridge.run_host_command(hostId=<returned hostId>, argv=[...])`. The clock starts
+when the Host successfully spawns the child process, not when the server accepts
+or the Host claims its Run. A completed Run returns bounded result evidence in
+the same response. Set `waitSeconds: 0` for an immediate asynchronous receipt,
+or an integer from 1–20 for a shorter execution response window.
 
-Refresh client tool discovery when the deployed descriptor changes. Confirm the
-actual result; passing a field through a stale interface is not proof it was sent.
+Queue pickup has a separate `queueWaitSeconds` budget (default 75, range 0–120).
+Input preparation and output transfer each have a `transferWaitSeconds` budget
+(default 60, range 0–120). Every response has an independent 120-second overall
+ceiling, which takes precedence. These are Bridge response limits, not a
+promised ChatGPT connection lifetime. They never change `timeoutSeconds`,
+queue retention or Host execution limits. A client can disconnect earlier.
 
-Bridge first admits the canonical Run, then polls its principal-scoped state at
-most once per second (up to 11 state reads). This includes Host queue latency;
-an offline/idle Host may not finish in the window. Waiting adds server reads and
-does not promise lower Cloudflare cost. If pending, it returns the same `runId`
-with its latest status (`waitStatus: timed_out`). On read failure or HTTP interruption it preserves the
-receipt (`waitStatus: unavailable` or `interrupted`) without output. Continue
-with `bridge.get_run` / `bridge.get_result`; do not resubmit to obtain output.
-Disconnecting the wait does not cancel the durable Run. Existing authorization,
-revocation, output limits and canonical execution identity remain in force.
-File export metadata can be returned inline; file resource links still require
-an explicit `bridge.get_result` read.
+Host 0.5.1 reports authenticated `PREPARING`, `EXECUTING` and `RETURNING_RESULT`
+progress. Older Hosts remain usable but cannot prove actual process start;
+unknown start is bounded by the queue budget instead of being counted as
+execution. Upgrade while preserving the Host ID, credential and local journal.
+
+Host polling is unchanged: 15 seconds after activity, 30 after five idle
+minutes, and 60 after ten idle minutes. Actual completed work resets activity;
+viewing Hosts or reading task status does not. Pickup can therefore take nearly
+one full idle interval plus network and preparation time.
+
+Bridge first admits and binds one canonical Run, then reads its owner-scoped
+state at most once per second, with a fixed maximum of 121 state reads. Waiting
+adds server reads. When a wait ends, retain the same `runId` and latest status.
+`waitStatus` distinguishes `timed_out`, `interrupted` and `unavailable`;
+`waitPhase` distinguishes `queue`, `awaiting_start`, `input_transfer`,
+`execution`, `output_transfer`, `result` and `total`. Neither a wait timeout nor
+a disconnected response cancels, repeats or charges for a second execution.
+Continue with `bridge.get_run` / `bridge.get_result`, without resubmitting the
+command. Authorization, revocation, output limits and execution identity remain
+in force. Export metadata may return inline; actual download links still require
+an explicit `bridge.get_result` read. Refresh client tool discovery after schema
+changes, and verify actual results rather than assuming a new field was sent.
 
 ## Minimal host policy
 

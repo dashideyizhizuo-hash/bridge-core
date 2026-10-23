@@ -1,11 +1,12 @@
 import {assertBridge} from './errors.mjs';
 import {assertDirectFileArgv} from './direct-exec.mjs';
-import {directWaitSeconds,waitForDirectResult} from './direct-run-wait.mjs';
+import {directWaitSettings,waitForDirectResult} from './direct-run-wait.mjs';
 
 const REPOSITORY_FIELDS=['repository','targetRef','targetSha','expectedPolicySha'];
 const REPOSITORY_REQUIRED=['repository','targetRef','expectedPolicySha'];
 const COMMAND_FIELDS=['id','argv','cwd','resources','timeoutSeconds'];
 const DIRECT_FIELDS=['argv','cwd','timeoutSeconds','assets','exports'];
+const WAIT_FIELDS=['waitSeconds','queueWaitSeconds','transferWaitSeconds'];
 // This is an explicit translator, not a capability-name or mode dispatcher.
 // The HTTP layer validates each input schema and resolves taskSessionToken
 // before invoking it. Unknown fields are still rejected here, never forwarded.
@@ -14,7 +15,7 @@ const INPUTS=Object.freeze({
   'bridge.create_host_pairing':[['ttlSeconds'],[]],
   'bridge.pause_host':[['hostId'],['hostId']],
   'bridge.resume_host':[['hostId'],['hostId']],
-  'bridge.run_host_command':[['hostId',...DIRECT_FIELDS,'waitSeconds'],['hostId','argv']],
+  'bridge.run_host_command':[['hostId',...DIRECT_FIELDS,...WAIT_FIELDS],['hostId','argv']],
   'bridge.import_file':[['file','ttlSeconds'],['file']],
   'bridge.create_file_upload':[['fileName','mimeType','sizeBytes','sha256','ttlSeconds'],['fileName','mimeType','sizeBytes','sha256']],
   'bridge.delete_file':[['assetId'],['assetId']],
@@ -59,9 +60,9 @@ export async function invokePublicTool(gateway,toolName,args={}, {signal}={}){
       return call(gateway,'run',{mode:'host',host:args.hostId,enabled:toolName==='bridge.resume_host'});
     case 'bridge.run_host_command':{
       assertDirectFileArgv(args.argv);
-      const seconds=directWaitSeconds({mode:'direct',...pick(args,['waitSeconds'])});
+      const {seconds,...wait}=directWaitSettings({mode:'direct',...pick(args,WAIT_FIELDS)});
       const receipt=await call(gateway,'run',{mode:'direct',host:args.hostId,...pick(args,DIRECT_FIELDS)});
-      return seconds===0?receipt:waitForDirectResult(gateway,receipt,seconds,{signal});
+      return seconds===0?receipt:waitForDirectResult(gateway,receipt,seconds,{signal,...wait});
     }
     case 'bridge.import_file':
       return call(gateway,'run',{mode:'asset',...pick(args,['file','ttlSeconds'])});

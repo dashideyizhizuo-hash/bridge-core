@@ -114,7 +114,7 @@ test('direct commands wait by default above the decorated gateway and submit onl
 test('zero wait returns the admitted receipt and invalid windows never dispatch',async()=>{
   let calls=0;const gateway={run:async()=>{calls++;return receipt;},getRun(){throw Error('must not poll');}};
   assert.equal(await invokePublicTool(gateway,'bridge.run_host_command',{hostId:'host-a',argv:['whoami'],waitSeconds:0}),receipt);
-  for(const waitSeconds of [-1,11,0.5,'1'])await assert.rejects(invokePublicTool(gateway,'bridge.run_host_command',{hostId:'host-a',argv:['whoami'],waitSeconds}),error=>error?.code==='INVALID_GATEWAY_REQUEST');
+  for(const waitSeconds of [-1,21,0.5,'1'])await assert.rejects(invokePublicTool(gateway,'bridge.run_host_command',{hostId:'host-a',argv:['whoami'],waitSeconds}),error=>error?.code==='INVALID_GATEWAY_REQUEST');
   assert.equal(calls,1);
 });
 
@@ -142,4 +142,12 @@ test('malformed argument containers and missing required fields are rejected loc
   for(const args of [null,[],1,'payload'])await assert.rejects(invokePublicTool(f.gateway,'bridge.list_hosts',args),denied);
   await assert.rejects(invokePublicTool(f.gateway,'bridge.run_host_command',{argv:['whoami']}),denied);
   assert.equal(f.calls.length,0);
+});
+
+test('all wait options reject invalid input before admission, including immediate calls',async()=>{
+  let submissions=0;
+  const gateway={run:async()=>{submissions++;throw Error('must not admit');}};
+  for(const key of ['queueWaitSeconds','transferWaitSeconds'])for(const value of [-1,121,0.5,'1',null])
+    await assert.rejects(invokePublicTool(gateway,'bridge.run_host_command',{hostId:'host-a',argv:['whoami'],waitSeconds:0,[key]:value}),e=>e.code==='INVALID_GATEWAY_REQUEST');
+  assert.equal(submissions,0);
 });

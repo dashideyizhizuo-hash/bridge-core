@@ -25,12 +25,13 @@ export async function runBounded({
   stdoutBytes,
   stderrBytes,
   outputBudgetBytes,
-  signal:abortSignal
+  signal:abortSignal,
+  onProgress
 }) {
   if(abortSignal?.aborted) throw new BridgeError('EXECUTION_CANCELED','Execution canceled before spawn');
-  const started = performance.now();
   return await new Promise((resolve, reject) => {
     let stdout = Buffer.alloc(0), stderr = Buffer.alloc(0), exceeded = null, timedOut = false, aborted = false;
+    let started=null,startedAt=null,observerError=null;
     const grouped = process.platform !== 'win32';
     const child = spawn(argv[0], argv.slice(1), { cwd, env, detached: grouped, windowsHide:true, stdio: ['ignore','pipe','pipe'] });
     let escalation;
@@ -60,7 +61,18 @@ export async function runBounded({
     if (abortSignal?.aborted) onAbort();
     else abortSignal?.addEventListener?.('abort', onAbort, { once: true });
 
-    const timer = setTimeout(() => { timedOut = true; stop(); }, timeoutSeconds * 1000);
+    const report=progress=>{
+      try {onProgress?.(progress);} catch(error) {observerError=error;stop();}
+    };
+    child.once('spawn',()=>{
+      // Successful OS spawn, not plan resolution, claim or file preparation,
+      // starts process-duration evidence and the synchronous execution wait.
+      started=performance.now();startedAt=new Date().toISOString();
+      report({phase:'EXECUTING',executionElapsedMs:0});
+    });
+    // Preserve the caller's existing hard execution/batch deadline. It is
+    // independent of the newly reported synchronous wait duration.
+    const timer=setTimeout(()=>{timedOut=true;stop();},timeoutSeconds*1000);
     const cleanup = () => {
       clearTimeout(timer);
       clearTimeout(escalation);
@@ -99,17 +111,25 @@ export async function runBounded({
     });
     child.on('close', (code, childSignal) => {
       cleanup();
+      const durationMs=started===null ? 0 : Math.max(0,Math.round(performance.now()-started));
+      const completedAt=new Date().toISOString();
+      // Wait for bounded close and group cleanup, including descendant-owned
+      // output streams, before declaring that command execution has ended.
+      if(started!==null) report({phase:'RETURNING_RESULT',executionElapsedMs:durationMs});
       const decodedStdout = decodeOutput(stdout, Boolean(exceeded));
       const decodedStderr = decodeOutput(stderr, Boolean(exceeded));
       const result = {
         exitCode: code,
         signal: childSignal,
-        durationMs: Math.max(0, Math.round(performance.now() - started)),
+        durationMs,
+        startedAt,
+        completedAt,
         stdout: decodedStdout.text,
         stderr: decodedStderr.text,
         stdoutBytes: stdout.length,
         stderrBytes: stderr.length
       };
+      if(observerError) return reject(observerError);
       if (exceeded) return reject(new BridgeError('OUTPUT_LIMIT_EXCEEDED', `${exceeded} exceeded configured limit`, result));
       if (timedOut) return reject(new BridgeError('EXECUTION_TIMEOUT', `capability exceeded ${timeoutSeconds}s timeout`, result));
       if (aborted) return reject(new BridgeError('EXECUTION_CANCELED', 'execution canceled by Bridge control plane', result));

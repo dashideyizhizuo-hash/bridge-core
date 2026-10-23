@@ -90,7 +90,7 @@ export const MCP_TOOL_DEFINITIONS = [
   {
     "name": "bridge.run_host_command",
     "title": "Run a command on a computer",
-    "description": "Run one bounded argv command on the explicitly chosen owned Host under its existing OS identity and local policy. Commands can change files and access the internet. No GitHub repository or workflow is required. Waits up to 10 seconds by default; a timeout or disconnect does not cancel or repeat execution. Keep the returned runId and query its status/result. File input/output uses only the declared managed asset/export placeholders; shell built-ins require an explicit shell executable.",
+    "description": "Run one bounded argv command on the explicitly chosen owned Host under its existing OS identity and local policy. Commands can change files and access the internet. No GitHub repository or workflow is required. Defaults to a 20-second response wait from actual command start. Queue pickup and input/output transfer have separate wait budgets, within a 120-second total response ceiling. A timeout or disconnect does not cancel or repeat execution. Keep the returned runId and query its status/result. File input/output uses only the declared managed asset/export placeholders; shell built-ins require an explicit shell executable.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -133,8 +133,16 @@ export const MCP_TOOL_DEFINITIONS = [
         "waitSeconds": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 10,
-          "description": "Defaults to 10. Zero returns immediately. This is a response wait window, not the execution timeout."
+          "maximum": 20,
+          "description": "Defaults to 20 seconds from actual process start, excluding queue/input/output transfer. Zero returns immediately. Does not change the command execution timeout."
+        },
+        "queueWaitSeconds": {
+          "type": "integer", "minimum": 0, "maximum": 120,
+          "description": "Defaults to 75 seconds waiting for Host pickup or a precise start report. Independent of execution waiting; all phases share a 120-second total response ceiling."
+        },
+        "transferWaitSeconds": {
+          "type": "integer", "minimum": 0, "maximum": 120,
+          "description": "Defaults to 60 seconds for each input preparation and output transfer stage. Does not cancel transfers; all phases share a 120-second total response ceiling."
         },
         "assets": {
           "type": "array",

@@ -1,6 +1,7 @@
 import { assertBridge } from '../errors.mjs';
 import { assertAuthenticatedPrincipal } from '../auth/principal.mjs';
 import { assertDirectFileArgv, validateDirectExecRequest } from '../direct-exec.mjs';
+import {DIRECT_RUN_PROGRESS_VERSION,directRunProgressFromRow,validateDirectRunProgress} from '../direct-run-progress.mjs';
 
 const HOST_PATTERN=/^[A-Za-z0-9_.-]{1,128}$/;
 const TOKEN_HASH_PATTERN=/^[0-9a-f]{64}$/;
@@ -88,6 +89,7 @@ function parseJson(value,label) {
 
 function normalizeRun(row) {
   if(!row) return null;
+  const progress=directRunProgressFromRow(row);
   return {
     runId:row.run_id,
     kind:'direct',
@@ -97,6 +99,7 @@ function normalizeRun(row) {
     status:row.status,
     createdAt:Number(row.created_at),
     updatedAt:Number(row.updated_at),
+    ...(progress ? {progress} : {}),
     ...(row.expires_at===null || row.expires_at===undefined
       ? {}
       : {expiresAt:Number(row.expires_at)}),
@@ -328,7 +331,8 @@ export class D1DirectExecStore {
     parseDirectRunId(runId);
     const row=await this.db.prepare(
       `SELECT request_id, run_id, host_id, status, created_at, updated_at,
-              completed_at, expires_at, cancel_reason
+              completed_at, expires_at, cancel_reason,
+              progress_phase, execution_elapsed_ms, progress_reported_at, phase_started_at
        FROM direct_runs
        WHERE run_id = ? AND bridge_user_id = ?
        LIMIT 1`
@@ -459,15 +463,19 @@ export class D1DirectExecStore {
          AND status='QUEUED' AND ${RUNNER_FENCE}
        RETURNING request_id, run_id, host_id, request_json,
                  status, lease_expires_at, created_at, updated_at,
-                 expires_at, cancel_reason`
+                 expires_at, cancel_reason,
+                 progress_phase, execution_elapsed_ms, progress_reported_at, phase_started_at`
     ).bind(owner,leaseExpiresAt,now,host,now,runnerTokenSha256).first();
 
     if(!row) return null;
+    const progress=directRunProgressFromRow(row);
     return {
       runId:row.run_id,
       request:validateDirectExecRequest(parseJson(row.request_json,'direct request')),
       leaseOwner:owner,
-      leaseExpiresAt:Number(row.lease_expires_at)
+      leaseExpiresAt:Number(row.lease_expires_at),
+      progressVersion:DIRECT_RUN_PROGRESS_VERSION,
+      ...(progress ? {progress} : {})
     };
   }
 
@@ -476,8 +484,10 @@ export class D1DirectExecStore {
     runnerTokenSha256,
     leaseOwner:valueOwner,
     runId,
-    leaseMs=60_000
+    leaseMs=60_000,
+    progress
   }={}) {
+    const nextProgress=progress===undefined ? undefined : validateDirectRunProgress(progress);
     const host=await this.assertRunner({hostId:value,runnerTokenSha256,signalPaused:true});
     const owner=leaseOwner(valueOwner);
     const parsed=parseDirectRunId(runId);
@@ -489,6 +499,32 @@ export class D1DirectExecStore {
     );
     const now=this.clock();
     const leaseExpiresAt=now+leaseMs;
+    if(nextProgress) {
+      // Phase and elapsed fences are consumed atomically with the same live
+      // credential/owner lease. Replay cannot reset a phase or extend a known
+      // execution start by refreshing an identical progress observation.
+      const row=await this.db.prepare(
+        `UPDATE direct_runs
+         SET lease_expires_at=?, updated_at=?,
+             progress_reported_at=CASE WHEN progress_phase IS NULL OR progress_phase<>? OR execution_elapsed_ms<>?
+               THEN ? ELSE progress_reported_at END,
+             phase_started_at=CASE WHEN progress_phase IS NULL OR progress_phase<>? THEN ? ELSE phase_started_at END,
+             progress_phase=?, execution_elapsed_ms=?
+         WHERE run_id=? AND host_id=? AND status='RUNNING' AND lease_owner=?
+           AND lease_expires_at>? AND ${RUNNER_FENCE}
+           AND (progress_phase IS NULL OR (
+             CASE progress_phase WHEN 'PREPARING' THEN 0 WHEN 'EXECUTING' THEN 1 ELSE 2 END
+               <= CASE ? WHEN 'PREPARING' THEN 0 WHEN 'EXECUTING' THEN 1 ELSE 2 END
+             AND execution_elapsed_ms<=?
+             AND (progress_phase<>'RETURNING_RESULT' OR execution_elapsed_ms=?)))
+         RETURNING run_id, lease_expires_at, progress_phase, execution_elapsed_ms, progress_reported_at, phase_started_at`
+      ).bind(leaseExpiresAt,now,nextProgress.phase,nextProgress.executionElapsedMs,now,
+        nextProgress.phase,now,nextProgress.phase,nextProgress.executionElapsedMs,
+        runId,host,owner,now,runnerTokenSha256,
+        nextProgress.phase,nextProgress.executionElapsedMs,nextProgress.executionElapsedMs).first();
+      assertBridge(row,'DIRECT_RUN_STALE','Direct Run lease or progress is stale or canceled');
+      return {runId:row.run_id,continue:true,leaseExpiresAt:Number(row.lease_expires_at),progress:directRunProgressFromRow(row)};
+    }
     const row=await this.db.prepare(
       `UPDATE direct_runs
        SET lease_expires_at=?, updated_at=?
@@ -593,7 +629,8 @@ export class D1DirectExecStore {
          AND lease_expires_at>? AND ${RUNNER_FENCE}
        RETURNING request_id, run_id, host_id, status,
                  created_at, updated_at, completed_at,
-                 expires_at, cancel_reason`
+                 expires_at, cancel_reason,
+                 progress_phase, execution_elapsed_ms, progress_reported_at, phase_started_at`
     ).bind(
       result.status,
       encoded,

@@ -1,11 +1,11 @@
 # Bridge Host — self-deployment
 
-This source prepares the `@dashideyizhizuo/bridge-host@0.5.0` candidate for your own Bridge deployment. Build the local archive below and explicitly select your self-hosted endpoint. The source-built package has a non-live placeholder default; do not overwrite or republish an existing registry version. Node.js 22+ and npm remain prerequisites; Bridge does not install Node or require Wrangler or Cloudflare credentials on customer hosts. Source preparation does not establish registry availability or production acceptance.
+This source prepares the `@dashideyizhizuo/bridge-host@0.5.1` candidate for your own Bridge deployment. Build the local archive below and explicitly select your self-hosted endpoint. The source-built package has a non-live placeholder default; do not overwrite or republish an existing registry version. Node.js 22+ and npm remain prerequisites; Bridge does not install Node or require Wrangler or Cloudflare credentials on customer hosts. Source preparation does not establish registry availability or production acceptance.
 
 ```sh
 npm run host:package
 npm pack ./dist/bridge-host-package --pack-destination ./dist
-npm install --ignore-scripts ./dist/dashideyizhizuo-bridge-host-0.5.0.tgz
+npm install --ignore-scripts ./dist/dashideyizhizuo-bridge-host-0.5.1.tgz
 npm exec --offline --no -- bridge-host setup --endpoint https://YOUR-BRIDGE-HOST/mcp
 ```
 
@@ -43,7 +43,7 @@ New installations default to `~/.config/bridge` on Windows, Linux and macOS. On 
 Background adapters copy a content-addressed, dependency-free Node runtime outside the npx cache. Deleting the npx cache or checkout does not delete the installed daemon. The user's Node executable must remain installed. Repeated setup reuses the same identity and unchanged registration; it does not automatically upgrade an existing runtime or overwrite a foreign service.
 
 After Windows background setup reports ready, you can close the installation
-terminal. New0.5.0 installations detach from the terminal; no terminal window
+terminal. New0.5.1 installations detach from the terminal; no terminal window
 needs to remain open. Upgrade an existing installation to adopt this behavior.
 Explicit foreground mode still requires its terminal. To stop a managed Host,
 use `bridge-host stop`; the desktop account must remain signed in and awake.
@@ -181,12 +181,12 @@ WSL boot remain unverified. Hosted macOS checks do not substitute for those desk
 
 ## 中文快速使用
 
-当前源码打包版本为 `@dashideyizhizuo/bridge-host@0.5.0`。按本文开头的命令从源码打包，安装本地 `dashideyizhizuo-bridge-host-0.5.0.tgz`，再通过 `npm exec --offline --no -- bridge-host ...` 运行。自部署必须指定自己的服务地址；源码包默认地址是非在线占位符。源码制品与运营方 npm 制品分开，不得覆盖或重新发布现有注册表版本，源码存在也不等于正式包已经发行。
+当前源码打包版本为 `@dashideyizhizuo/bridge-host@0.5.1`。按本文开头的命令从源码打包，安装本地 `dashideyizhizuo-bridge-host-0.5.1.tgz`，再通过 `npm exec --offline --no -- bridge-host ...` 运行。自部署必须指定自己的服务地址；源码包默认地址是非在线占位符。源码制品与运营方 npm 制品分开，不得覆盖或重新发布现有注册表版本，源码存在也不等于正式包已经发行。
 安装前准备 Node.js 22 或更高版本以及 npm。首次运行 `bridge-host --endpoint https://你的实际域名/mcp`，确认允许
 以当前系统用户执行命令，然后在浏览器授权。不要用管理员或 root 身份安装。
 
 - 默认优先使用当前用户的后台服务；无法使用后台服务时会明确进入前台模式。
-- Windows 后台就绪后可以关闭安装终端，无需保留 PowerShell 窗口。已有安装须显式升级至0.5.0才会使用脱离终端的启动方式；前台模式仍需保持窗口。
+- Windows 后台就绪后可以关闭安装终端，无需保留 PowerShell 窗口。已有安装须显式升级至0.5.1才会使用脱离终端的启动方式；前台模式仍需保持窗口。
 - `bridge-host --foreground`：保持终端打开；Ctrl+C 停止，不删除配对身份。
 - `bridge-host status` / `bridge-host autostart status`：分别查看当前运行、自动启动开关及连接状态。
 - `bridge-host autostart on`：开启以后自动启动；当前已停止的 Host 不会立即启动。

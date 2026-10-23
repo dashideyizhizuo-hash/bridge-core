@@ -8,7 +8,7 @@ const principal=bridgeUserId=>({bridgeUserId,externalProvider:'test',externalSub
 function fixture(t) {
   const sql=new DatabaseSync(':memory:');t.after(()=>sql.close());
   sql.exec("PRAGMA foreign_keys=ON; CREATE TABLE bridge_users(id TEXT PRIMARY KEY); INSERT INTO bridge_users VALUES('user-a'),('user-b')");
-  for(const file of ['0009_direct_exec.sql','0010_direct_exec_hardening.sql'])
+  for(const file of ['0009_direct_exec.sql','0010_direct_exec_hardening.sql','0039_direct_run_progress.sql'])
     sql.exec(readFileSync(new URL('../migrations/'+file,import.meta.url),'utf8'));
   const db={
     prepare(query) {

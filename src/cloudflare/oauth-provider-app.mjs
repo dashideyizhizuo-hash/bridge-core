@@ -533,6 +533,9 @@ export function createCloudflareBridgeOAuthProvider({
             'SELECT expires_at, cancel_reason FROM direct_runs LIMIT 1'
           ).first();
           await bindings.DB.prepare(
+            'SELECT progress_phase, execution_elapsed_ms, progress_reported_at, phase_started_at FROM direct_runs LIMIT 0'
+          ).first();
+          await bindings.DB.prepare(
             'SELECT status, expires_at, persistent, source_kind FROM direct_assets LIMIT 1'
           ).first();
           await bindings.DB.prepare(

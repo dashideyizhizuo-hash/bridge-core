@@ -8,7 +8,7 @@ import {D1DirectAssetStore} from '../src/cloudflare/d1-direct-asset-store.mjs';
 test('actual bounded cleanup SQL uses maintenance indexes without temporary sorting',async t=>{
   const native=new DatabaseSync(':memory:');t.after(()=>native.close());
   native.exec('CREATE TABLE bridge_users(id TEXT PRIMARY KEY)');
-  for(const file of ['0009_direct_exec.sql','0010_direct_exec_hardening.sql','0011_direct_assets.sql',
+  for(const file of ['0009_direct_exec.sql','0010_direct_exec_hardening.sql','0039_direct_run_progress.sql','0011_direct_assets.sql',
     '0012_persistent_direct_assets.sql','0021_direct_asset_object_retirements.sql','0022_direct_cleanup_indexes.sql']){
     native.exec(readFileSync(new URL('../migrations/'+file,import.meta.url),'utf8'));
   }

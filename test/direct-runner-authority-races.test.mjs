@@ -12,7 +12,7 @@ const hostId='host-main',leaseOwner='runner-owner';
 function fixture(t){
   const sql=new DatabaseSync(':memory:');t.after(()=>sql.close());
   sql.exec("PRAGMA foreign_keys=ON; CREATE TABLE bridge_users(id TEXT PRIMARY KEY); INSERT INTO bridge_users VALUES('user-a'),('user-b')");
-  for(const name of ['0009_direct_exec.sql','0010_direct_exec_hardening.sql'])
+  for(const name of ['0009_direct_exec.sql','0010_direct_exec_hardening.sql','0039_direct_run_progress.sql'])
     sql.exec(readFileSync(new URL('../migrations/'+name,import.meta.url),'utf8'));
   let hook=null,tail=Promise.resolve(),now=1000;
   const db={prepare(q){return {bind(...args){return {

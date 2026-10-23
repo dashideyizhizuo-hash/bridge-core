@@ -1,12 +1,12 @@
 // One host package contract shared by packaging and durable service installation.
-export const HOST_VERSION='0.5.0';
+export const HOST_VERSION='0.5.1';
 export const HOST_PACKAGE_NAME='@dashideyizhizuo/bridge-host';
 export const HOST_SDK_VERSION='2.3.1';
 export const DEFAULT_HOST_ENDPOINT='https://bridge.example.invalid/mcp';
 export const HOST_RUNTIME_FILES=Object.freeze([
   'bin/bridge-host-daemon.mjs',
   'src/host-files.mjs','src/host-platform.mjs','src/host-runner.mjs','src/host-runtime-status.mjs',
-  'src/direct-connect-client.mjs','src/direct-runner-client.mjs','src/direct-exec.mjs',
+  'src/direct-run-progress.mjs','src/direct-connect-client.mjs','src/direct-runner-client.mjs','src/direct-exec.mjs',
   'src/direct-runner-assets.mjs','src/direct-runner-exports.mjs','src/direct-runner-journal.mjs','src/doctor.mjs',
   'src/validate.mjs','src/parameters.mjs','src/task-runtime-binding.mjs','src/environment.mjs',
   'src/execute.mjs','src/json.mjs','src/errors.mjs','src/host-http.mjs'

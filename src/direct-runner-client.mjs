@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { readJsonFile } from './json.mjs';
 import { BridgeError, assertBridge, errorEnvelope } from './errors.mjs';
 import { executeDirectExec, resolveDirectExecPlan, validateDirectExecRequest } from './direct-exec.mjs';
+import {DIRECT_RUN_PROGRESS_VERSION,validateDirectRunProgress} from './direct-run-progress.mjs';
 import { cleanupDirectAssetCache, stageDirectAssets } from './direct-runner-assets.mjs';
 import {
   cleanupDirectExportCache,
@@ -103,6 +104,7 @@ export async function heartbeatDirectRun({
   leaseOwner,
   runId,
   leaseMs=90_000,
+  progress,
   fetchImpl=globalThis.fetch,
   signal,
   timeoutMs=15_000
@@ -111,7 +113,8 @@ export async function heartbeatDirectRun({
   const response=await boundedOriginFetch(base.origin,{fetchImpl,signal,timeoutMs})(new URL('/direct/runner/heartbeat',base.origin),{
     method:'POST',
     headers:headers(runnerToken(token)),
-    body:JSON.stringify({hostId,leaseOwner,runId,leaseMs})
+    body:JSON.stringify({hostId,leaseOwner,runId,leaseMs,
+      ...(progress===undefined ? {} : {progress:validateDirectRunProgress(progress)})})
   });
   return parseResponse(response,'direct heartbeat');
 }
@@ -225,11 +228,14 @@ function ownerPaused(error) {
 
 function startHeartbeat({
   endpoint,hostId,token,leaseOwner,runId,leaseMs,heartbeatMs,
-  controller,fetchImpl,onContact,claimStartedAt
+  controller,fetchImpl,onContact,claimStartedAt,progressVersion,initialProgress,signal:runnerSignal
 }) {
   let stopped=false,busy=false,fatalError=null,deadline;
+  const progressEnabled=progressVersion===DIRECT_RUN_PROGRESS_VERSION;
+  let progress=initialProgress ? validateDirectRunProgress({phase:initialProgress.phase,executionElapsedMs:initialProgress.executionElapsedMs}) : null;
+  let executionStarted=null,executionEnded=null,queued=Promise.resolve(),queuedCount=0;
   const stopController=new AbortController();
-  const signal=AbortSignal.any([controller.signal,stopController.signal]);
+  const signal=AbortSignal.any([controller.signal,stopController.signal,...(runnerSignal ? [runnerSignal] : [])]);
   const expire=()=>{
     if(stopped || controller.signal.aborted) return;
     fatalError=new BridgeError('DIRECT_RUN_LEASE_UNCERTAIN',
@@ -244,24 +250,60 @@ function startHeartbeat({
     deadline=setTimeout(expire,remaining);deadline.unref?.();
   };
   arm(claimStartedAt);
-  const tick=async()=>{
-    if(stopped || busy || controller.signal.aborted) return;
+  const tick=async nextProgress=>{
+    if(stopped || busy || signal.aborted) return;
     busy=true;
     const sentAt=performance.now();
+    // A phase can queue behind a slow prior heartbeat. Sample execution at
+    // actual dispatch, not at enqueue, or that network delay would erase real
+    // process time. Once bounded close occurs, freeze it before any uploads.
+    const outboundProgress=nextProgress?.phase==='EXECUTING' && executionStarted!==null
+      ? {...nextProgress,executionElapsedMs:executionEnded ?? Math.min(3_700_000,
+        Math.max(nextProgress.executionElapsedMs,Math.floor(sentAt-executionStarted)))}
+      : nextProgress;
     try {
-      await heartbeatDirectRun({endpoint,hostId,token,leaseOwner,runId,leaseMs,fetchImpl,signal});
+      await heartbeatDirectRun({endpoint,hostId,token,leaseOwner,runId,leaseMs,fetchImpl,signal,
+        ...(outboundProgress ? {progress:outboundProgress} : {})});
       if(!stopped && !controller.signal.aborted) {arm(sentAt);onContact();}
     } catch(error) {
-      if(!stopped && !controller.signal.aborted && (authFatal(error) || ownerPaused(error) || error?.status===409)) {
+      if(!stopped && !controller.signal.aborted && (authFatal(error) || ownerPaused(error) || error?.status===409 || error?.code==='DIRECT_RUN_PROGRESS_INVALID')) {
         fatalError=error;controller.abort(error);
       }
       // Independent deadline still fires while a fetch is pending or busy.
     } finally {busy=false;}
   };
-  const timer=setInterval(()=>{void tick();},heartbeatMs);timer.unref?.();
+  const enqueue=value=>{
+    queuedCount++;
+    queued=queued.then(()=>tick(value)).finally(()=>{queuedCount--;});
+    return queued;
+  };
+  const snapshot=()=>progress?.phase==='EXECUTING' && executionStarted!==null
+    ? {...progress,executionElapsedMs:Math.min(3_700_000,Math.max(progress.executionElapsedMs,Math.floor(performance.now()-executionStarted)))}
+    : progress;
+  const timer=setInterval(()=>{
+    if(!progressEnabled) {void tick();return;}
+    // A slow fetch must not produce an unbounded heartbeat queue. Phase
+    // transitions below are always serialized; ordinary ticks may coalesce.
+    if(!busy && queuedCount===0) void enqueue(snapshot());
+  },heartbeatMs);timer.unref?.();
   return {
     stop() {stopped=true;clearInterval(timer);clearTimeout(deadline);stopController.abort();},
-    fatalError:()=>fatalError
+    fatalError:()=>fatalError,
+    progress(value) {
+      if(!progressEnabled) return;
+      const next=validateDirectRunProgress(value);
+      if(progress?.phase==='RETURNING_RESULT') {
+        // Durable replay does not create a second execution or alter duration.
+        if(next.phase!=='RETURNING_RESULT')return;
+        next.executionElapsedMs=progress.executionElapsedMs;
+      } else if(progress?.phase==='EXECUTING' && next.phase==='PREPARING') return;
+      if(progress)next.executionElapsedMs=Math.max(next.executionElapsedMs,progress.executionElapsedMs);
+      if(progress?.phase===next.phase && progress.executionElapsedMs===next.executionElapsedMs)return;
+      if(next.phase==='EXECUTING' && executionStarted===null)executionStarted=performance.now()-next.executionElapsedMs;
+      if(next.phase==='RETURNING_RESULT')executionEnded=next.executionElapsedMs;
+      progress=next;void enqueue({...next});
+    },
+    drain:()=>queued
   };
 }
 
@@ -287,8 +329,10 @@ export async function runDirectRunnerOnce({
   const controller=new AbortController();
   const lifecycleSignal=signal ? AbortSignal.any([controller.signal,signal]) : controller.signal;
   const heartbeat=startHeartbeat({endpoint,hostId,token,leaseOwner:claimed.leaseOwner,runId:claimed.runId,
-    leaseMs,heartbeatMs,controller,fetchImpl,onContact,claimStartedAt});
+    leaseMs,heartbeatMs,controller,fetchImpl,onContact,claimStartedAt,
+    progressVersion:claimed.progressVersion,initialProgress:claimed.progress,signal:lifecycleSignal});
   try {
+    heartbeat.progress({phase:'PREPARING',executionElapsedMs:0});
     if(journal.state==='COMPLETED') {
       result=journal.result;
       if(result.status==='SUCCEEDED' && (request.exports?.length ?? 0)>0) {
@@ -339,7 +383,8 @@ export async function runDirectRunnerOnce({
             hostPolicy,
             signal:lifecycleSignal,
             assetPaths,
-            exportPaths
+            exportPaths,
+            onProgress:progress=>heartbeat.progress(progress)
           });
           if(result.status==='SUCCEEDED' && exportPaths.length>0) {
             exportItems=collectDirectExports({request,exportPaths});
@@ -353,6 +398,11 @@ export async function runDirectRunnerOnce({
       }
       result=markDirectJournalCompleted({hostPolicy,request,result}).result;
     }
+
+    // Includes pre-spawn failures and durable replay, which must never invent
+    // a new EXECUTING event. Final duration stays frozen throughout uploads.
+    heartbeat.progress({phase:'RETURNING_RESULT',executionElapsedMs:result.execution?.durationMs ?? claimed.progress?.executionElapsedMs ?? 0});
+    await heartbeat.drain();
 
     // Upload only files from declared, Bridge-owned export slots while the
     // lease is still current. A network failure leaves the local journal and

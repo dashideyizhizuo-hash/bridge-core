@@ -1,6 +1,6 @@
 # ChatGPT / Codex package
 
-This document specifies the explicit-tool core release candidate. Host 0.5.0
+This document specifies the explicit-tool core release candidate. Host 0.5.1
 is source preparation, not a claim that a registry package was published or a
 particular self-hosted service was deployed. Build and inspect your local
 artifact, choose your own endpoint and test its actual tool inventory.
@@ -67,7 +67,7 @@ This core does not accept a client `idempotencyKey` or promise persistent
 submission deduplication. Internal request identities and the Host journal still
 fence recognized execution/replay; they do not make two new submissions one task.
 
-Source-built Host 0.5.0 requires your explicit HTTPS endpoint. It completes
+Source-built Host 0.5.1 requires your explicit HTTPS endpoint. It completes
 browser OAuth, calls `bridge.create_host_pairing` and claims its short-lived
 capability locally. Upgrades preserve saved Host identity, runner credential,
 service settings and journal. Pairing material remains in the official flow

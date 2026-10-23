@@ -309,9 +309,9 @@ export async function executeDirectExec({
   defaultRoot,
   signal = null,
   assetPaths = [],
-  exportPaths = []
+  exportPaths = [],
+  onProgress
 }) {
-  const startedAt = new Date().toISOString();
   const plan = resolveDirectExecPlan({ request, hostPolicy, defaultRoot });
   const assets=plan.request.assets ?? [];
   const exports=plan.request.exports ?? [];
@@ -343,6 +343,7 @@ export async function executeDirectExec({
     stdoutBytes: plan.limits.stdoutBytes,
     stderrBytes: plan.limits.stderrBytes,
     outputBudgetBytes: plan.limits.resultBytes,
+    onProgress,
     ...(signal === null ? {} : {signal})
   }); } catch(error) {
     // Retain bounded partial execution evidence for failed native commands.
@@ -370,8 +371,8 @@ export async function executeDirectExec({
       stdout: execution.stdout,
       stderr: execution.stderr
     },
-    startedAt,
-    completedAt: new Date().toISOString()
+    startedAt:execution.startedAt,
+    completedAt:execution.completedAt
   };
   if(executionError) {
     const wrapped=new BridgeError(executionError.code,executionError.message,result);
