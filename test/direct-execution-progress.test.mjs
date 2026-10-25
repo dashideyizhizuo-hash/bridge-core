@@ -97,10 +97,17 @@ test('heartbeat API passes only validated progress and returns client error for 
   body.progress={phase:'EXECUTING',executionElapsedMs:0,phaseStartedAt:1};
   assert.equal((await handler.fetch(request())).status,400);
 });
-test('native process emits execution only after successful spawn and freezes it before returning',async()=>{
+test('native process emits execution only after successful spawn and freezes it before returning',async t=>{
+  const root=makeTestDirectory(join(tmpdir(),'bridge-native-progress-'));
+  t.after(()=>rmSync(root,{recursive:true,force:true}));
+  const gate=join(root,'spawn-observed');
   const phases=[];
-  const result=await runBounded({cwd:process.cwd(),argv:[process.execPath,'-e','setTimeout(()=>console.log("done"),120)'],env:process.env,
-    timeoutSeconds:5,stdoutBytes:1024,stderrBytes:1024,onProgress:value=>phases.push(value)});
+  // The child can run before a busy parent receives its spawn event. Start
+  // the measured delay after that event, so scheduling is not the assertion.
+  const script='const fs=require("fs");const gate='+JSON.stringify(gate)+';function wait(){if(fs.existsSync(gate))setTimeout(()=>console.log("done"),120);else setTimeout(wait,5)}wait();';
+  const result=await runBounded({cwd:process.cwd(),argv:[process.execPath,'-e',script],env:process.env,
+    timeoutSeconds:5,stdoutBytes:1024,stderrBytes:1024,onProgress:value=>{phases.push(value);if(value.phase==='EXECUTING')writeFileSync(gate,'ready');}});
+  assert.equal(result.exitCode,0);assert.equal(result.stdout.trim(),'done');
   assert.deepEqual(phases.map(x=>x.phase),['EXECUTING','RETURNING_RESULT']);
   assert.equal(phases[0].executionElapsedMs,0);assert.equal(phases[1].executionElapsedMs,result.durationMs);
   assert.ok(result.durationMs>=100);assert.ok(Date.parse(result.startedAt)<=Date.parse(result.completedAt));
