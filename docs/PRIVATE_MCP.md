@@ -39,13 +39,14 @@ The private server binds only to loopback. Put TLS/authenticated reverse-proxy o
 
 ## 2. Target repository prerequisites
 
-Each target repository must contain, on its trusted default branch:
+Execution/publication uses the following trusted default-branch workflows:
 
 ```text
-.bridge/project.json
 .github/workflows/bridge-gateway.yml
 .github/workflows/bridge-publish.yml
 ```
+
+When `.bridge/project.json` is absent from the trusted default-branch SHA, Bridge uses the same versioned default profile throughout discovery, execution, editing, verification and publication. It uses runner class `bridge`, bounded argv execution, and existing `agent/**` or `codex/**` edit branches. Default verification is `git diff --check`: report `patch-integrity` and `projectTestsRun=false`, never that project tests passed. An optional advanced policy file, when present, remains authoritative and must validate; invalid custom policy does not silently fall back. Workflows, runner availability, host policy and repository grants must still be checked independently before claiming execution is ready.
 
 Canonical workflow templates are:
 
@@ -241,7 +242,7 @@ Do not expose port 8787 directly to the Internet.
 
 Before authorizing a repository:
 
-1. validate `.bridge/project.json`;
+1. inspect the effective default profile, or validate the optional advanced `.bridge/project.json`;
 2. install the two exact workflow templates;
 3. set the gateway runner labels deliberately;
 4. confirm the Bridge private Action is usable by the target repository;

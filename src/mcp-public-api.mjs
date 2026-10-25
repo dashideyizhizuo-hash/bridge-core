@@ -71,7 +71,7 @@ export async function invokePublicTool(gateway,toolName,args={}, {signal}={}){
     case 'bridge.delete_file':
       return call(gateway,'run',{mode:'asset',assetAction:'delete',assetId:args.assetId});
     case 'bridge.get_repository_configuration':
-      return pick(await call(gateway,'discover',{repository:args.repository,...(signal?{signal}:{})}),['repository','policy','capabilities','exec','workspaceExec','editing','mcp']);
+      return pick(await call(gateway,'discover',{repository:args.repository,...(signal?{signal}:{})}),['repository','policy','capabilities','exec','workspaceExec','editing','mcp','policyProfile','executionEnvironment']);
     case 'bridge.execute_repository_commands':{
       assertBridge(Array.isArray(args.commands)&&args.commands.length>=1&&args.commands.length<=16,'INVALID_MCP_ARGUMENTS','Repository commands must contain 1-16 command records');
       const steps=args.commands.map(command=>{

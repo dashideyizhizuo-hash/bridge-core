@@ -332,7 +332,7 @@ export const MCP_TOOL_DEFINITIONS = [
   {
     "name": "bridge.get_repository_configuration",
     "title": "Inspect repository configuration",
-    "description": "Read the trusted default-branch Bridge policy for one explicitly chosen authorized GitHub repository. Report the actual policy ref/SHA, runner classes and configured execution/editing controls. This is configuration inspection, not proof that a runner is online or that a job succeeded. Missing GitHub connection, saved selection or project policy remains an error; this tool never installs or bypasses it.",
+    "description": "Read the effective Bridge profile at the trusted default-branch SHA for one explicitly chosen authorized GitHub repository. An absent .bridge/project.json selects the versioned default profile; a present advanced file remains authoritative. Report the actual policy ref/SHA, runner classes and configured execution/editing controls. This is configuration inspection, not proof that a runner is online or that a job succeeded. Missing GitHub connection, saved selection or permission remains an error. A profile does not prove workflow, runner or host readiness; report unchecked prerequisites honestly.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -473,7 +473,7 @@ export const MCP_TOOL_DEFINITIONS = [
   {
     "name": "bridge.verify_repository",
     "title": "Verify repository code",
-    "description": "Run the fixed verification recipe explicitly configured in the trusted default-branch project policy against the pinned target. This starts stateful runner work and may execute project code. It does not edit or publish repository changes. A missing, stale or invalid recipe fails closed. The caller cannot choose a capability, supply arbitrary parameters, replace the recipe or skip its checks. Inspect the actual run result; successful verification alone does not authorize publication.",
+    "description": "Run the effective profile verification against the pinned target and trusted policy SHA. Without an advanced project file, the versioned default runs git diff --check only: patch-integrity, projectTestsRun=false. Never report this as project tests passing. This starts stateful runner work and may execute project code. It does not edit or publish repository changes. A stale profile or invalid advanced recipe fails closed. The caller cannot choose a capability, supply arbitrary parameters, replace the recipe or skip its checks. Inspect the actual run result; successful verification alone does not authorize publication.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -525,7 +525,7 @@ export const MCP_TOOL_DEFINITIONS = [
   {
     "name": "bridge.edit_and_verify_repository",
     "title": "Edit and verify repository changes",
-    "description": "Apply bounded text edits to existing tracked files on an allowed existing target branch, then execute the fixed trusted verification recipe. Project and host policy must permit the exact paths, runner identity and limits; protected configuration paths cannot be edited. Verification cannot be omitted or selected by the caller. Returns a VERIFIED candidate only when trusted checks succeed. Changes are not published by this tool; publish is a separate explicit operation. A missing or stale recipe fails closed.",
+    "description": "Apply bounded text edits to existing tracked files on an allowed existing target branch, then execute the effective trusted profile verification. The default profile permits existing agent/** or codex/** edit branches and runs patch-integrity only (git diff --check, projectTestsRun=false); this does not prove project tests passed. Project and host policy must permit the exact paths, runner identity and limits; protected configuration paths cannot be edited. Verification cannot be omitted or selected by the caller. Returns a VERIFIED candidate only when trusted checks succeed. Changes are not published by this tool; publish is a separate explicit operation. A stale profile or invalid advanced recipe fails closed.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -857,7 +857,7 @@ export const MCP_TOOL_DEFINITIONS = [
   {
     "name": "bridge.repository_tools_status",
     "title": "Check repository tool availability",
-    "description": "Read the exposure status of already declared repository preset tools, including missing policy or catalog limits. This grants no repository access and never executes a preset. Ordinary Host and file operations remain available when repository integration is unavailable.",
+    "description": "Read the exposure status of already declared repository preset tools, including effective default/advanced profile and catalog limits. An absent optional project file is not an authorization failure. This grants no repository access and never executes a preset. Ordinary Host and file operations remain available when repository integration is unavailable.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,

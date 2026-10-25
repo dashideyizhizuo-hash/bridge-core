@@ -1,9 +1,10 @@
+import {policyProfile} from './default-project-policy.mjs';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, resolve } from 'node:path';
 import { assertBridge } from './errors.mjs';
-import { ensureCommit, git, showFile } from './git.mjs';
+import { ensureCommit, git, readTrustedProjectPolicyBytes } from './git.mjs';
 import { parseJsonBytes, readJsonFile } from './json.mjs';
 import { executeRequest } from './runtime.mjs';
 import { validateEditRequest, validateHostPolicy, validateProjectPolicy } from './validate.mjs';
@@ -52,8 +53,9 @@ export async function verifyEditCandidate({ prepareDir, repoPath, hostPolicyPath
   assertBridge(stable(request.verification) === stable(prep.verification), 'REQUEST_BINDING_MISMATCH', 'verification plan changed after preparation');
 
   const repo = realpathSync(resolve(repoPath));
-  const projectPolicyBytes = showFile(repo, prep.policySha, '.bridge/project.json');
+  const projectPolicyBytes = readTrustedProjectPolicyBytes(repo, prep.policySha, prep.repository);
   const projectPolicy = validateProjectPolicy(parseJsonBytes(projectPolicyBytes, 'trusted project policy'), prep.repository);
+  if(prep.projectPolicySha256)assertBridge(prep.projectPolicySha256===sha256(projectPolicyBytes),'POLICY_STALE','Prepared candidate policy bytes changed');
   const hostPolicyBytes = readFileSync(hostPolicyPath);
   validateHostPolicy(readJsonFile(hostPolicyPath, 'host policy'));
 
@@ -117,6 +119,7 @@ export async function verifyEditCandidate({ prepareDir, repoPath, hostPolicyPath
       changedFiles: prep.changedFiles,
       verificationPlanSha256: sha256(stable(request.verification)),
       projectPolicySha256: sha256(projectPolicyBytes),
+      policyProfile:policyProfile(JSON.parse(projectPolicyBytes)),
       verificationHostPolicySha256: sha256(hostPolicyBytes),
       verifications,
       completedAt: new Date().toISOString()

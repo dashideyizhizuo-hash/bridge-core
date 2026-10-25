@@ -8,15 +8,16 @@ When Git engineering semantics are required, the preferred onboarding path is th
 node bin/bridge-runner.mjs bootstrap-project \
   --bridge-repository YOUR-OWNER/YOUR-RUNTIME \
   --repo /path/to/repository \
-  --verify-argv '["npm","test"]' \
   --host-policy /etc/bridge/host.json
 ```
 
 See [GitHub Engineering Bootstrap](GITHUB_BOOTSTRAP.md).
 
-A repository integrates with the GitHub engineering plane by committing one trusted project policy and thin GitHub Actions entrypoints.
+A repository integrates with the GitHub engineering plane using thin pinned GitHub Actions entrypoints and independent runner/host authorization.
 
-## 1. Canonical policy
+When `.bridge/project.json` is absent from the trusted default-branch SHA, Bridge uses the same versioned default profile throughout discovery, execution, editing, verification and publication. It uses runner class `bridge`, bounded argv execution, and existing `agent/**` or `codex/**` edit branches. Default verification is `git diff --check`: report `patch-integrity` and `projectTestsRun=false`, never that project tests passed. An optional advanced policy file, when present, remains authoritative and must validate; invalid custom policy does not silently fall back. Workflows, runner availability, host policy and repository grants must still be checked independently before claiming execution is ready.
+
+## 1. Optional advanced policy
 
 Path:
 
@@ -26,9 +27,9 @@ Path:
 
 Bridge uses JSON deliberately as the canonical policy format so the runner core does not depend on a YAML parser.
 
-A request executes target code at `target.sha`, but Bridge loads `.bridge/project.json` from the separately bound trusted `policy.sha`. Therefore a candidate cannot grant itself a new capability by modifying its own policy file.
+A request executes target code at `target.sha`, but Bridge resolves the optional `.bridge/project.json` or versioned default profile at the separately bound trusted `policy.sha`. Therefore a candidate cannot grant itself a new capability by modifying its own policy file.
 
-## 2. Minimal policy
+## 2. Advanced policy example
 
 ```json
 {
@@ -247,7 +248,7 @@ Sequence:
 
 ## 11. Project onboarding checklist
 
-- `.bridge/project.json` is committed;
+- the effective versioned default profile is inspected, or an optional advanced `.bridge/project.json` is committed;
 - repository identity matches;
 - every capability has a valid runner/class;
 - commands are argv, not shell strings;

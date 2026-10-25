@@ -1,3 +1,4 @@
+import {policyProfile} from './default-project-policy.mjs';
 import { randomUUID } from 'node:crypto';
 import { assertBridge } from './errors.mjs';
 import { validateAndDefaultParameters } from './parameters.mjs';
@@ -232,6 +233,8 @@ export class BridgeGateway {
       policy:{ref:info.defaultRef,sha:info.defaultSha},
       capabilities,
       mcp:{verificationConfigured:Array.isArray(policy.mcp?.verification)},
+      policyProfile:policyProfile(policy),
+      executionEnvironment:{status:"unchecked",requirements:["workflow","runner","host-policy"]},
       exec:genericExec,
       workspaceExec:workspace,
       editing

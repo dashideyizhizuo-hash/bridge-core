@@ -9,7 +9,7 @@ import { verifyEditCandidate } from '../src/verify-edit.mjs';
 import { publishEditCandidate } from '../src/publish-edit.mjs';
 import { errorEnvelope } from '../src/errors.mjs';
 import { readJsonFile, parseJsonBytes } from '../src/json.mjs';
-import { showFile } from '../src/git.mjs';
+import { readTrustedProjectPolicyBytes } from '../src/git.mjs';
 import { validateHostPolicy, validateProjectPolicy } from '../src/validate.mjs';
 import { executeDirectExec } from '../src/direct-exec.mjs';
 import { runDirectRunnerLoop } from '../src/direct-runner-client.mjs';
@@ -17,7 +17,7 @@ import { connectDirectHost, readDirectRunnerEnv } from '../src/direct-connect-cl
 import { bootstrapProject } from '../src/bootstrap-project.mjs';
 
 function usage() {
-  process.stderr.write(`Usage:\n  bridge-runner execute --request FILE --repo PATH --host-policy FILE --output-dir DIR\n  bridge-runner direct-exec --request FILE --host-policy FILE --output-dir DIR\n  bridge-runner connect --endpoint URL [--pairing-token TOKEN|--pairing-token-file FILE] [--config-dir DIR]\n  bridge-runner direct-loop --host-policy FILE [--env-file FILE|--endpoint URL] [--poll-ms N] [--once]\n  bridge-runner bootstrap-project --repo PATH --verify-argv JSON [--repository owner/repo] [--host-policy FILE] [--runner-class NAME] [--service-user USER] --bridge-repository owner/repo [--bridge-sha SHA|current] [--force]\n  bridge-runner prepare-edit --request FILE --repo PATH --host-policy FILE --output-dir DIR\n  bridge-runner verify-edit --prepare-dir DIR --repo PATH --host-policy FILE --output-dir DIR\n  bridge-runner publish-edit --prepare-dir DIR --verification-dir DIR --repo PATH --output-dir DIR\n  bridge-runner doctor --host-policy FILE [--repository owner/repo]\n  bridge-runner validate-host-policy --host-policy FILE\n  bridge-runner validate-project-policy --repo PATH --policy-sha SHA --repository owner/repo\n`);
+  process.stderr.write(`Usage:\n  bridge-runner execute --request FILE --repo PATH --host-policy FILE --output-dir DIR\n  bridge-runner direct-exec --request FILE --host-policy FILE --output-dir DIR\n  bridge-runner connect --endpoint URL [--pairing-token TOKEN|--pairing-token-file FILE] [--config-dir DIR]\n  bridge-runner direct-loop --host-policy FILE [--env-file FILE|--endpoint URL] [--poll-ms N] [--once]\n  bridge-runner bootstrap-project --repo PATH [--verify-argv JSON] [--repository owner/repo] [--host-policy FILE] [--runner-class NAME] [--service-user USER] --bridge-repository owner/repo [--bridge-sha SHA|current] [--force]\n  bridge-runner prepare-edit --request FILE --repo PATH --host-policy FILE --output-dir DIR\n  bridge-runner verify-edit --prepare-dir DIR --repo PATH --host-policy FILE --output-dir DIR\n  bridge-runner publish-edit --prepare-dir DIR --verification-dir DIR --repo PATH --output-dir DIR\n  bridge-runner doctor --host-policy FILE [--repository owner/repo]\n  bridge-runner validate-host-policy --host-policy FILE\n  bridge-runner validate-project-policy --repo PATH --policy-sha SHA --repository owner/repo\n`);
   process.exit(64);
 }
 const [command, ...rest] = process.argv.slice(2); if (!command) usage();
@@ -57,9 +57,9 @@ try {
     writeFileSync(resolve(values['output-dir'],'bridge-result.json'),JSON.stringify(result,null,2)+'\n');
     process.stdout.write(JSON.stringify({ok:true,status:result.status,requestId:result.requestId,hostId:result.hostId,transport:'direct'})+'\n');
   } else if (command === 'bootstrap-project') {
-    if (!values.repo || !values['verify-argv']) usage();
+    if (!values.repo) usage();
     let verify;
-    try { verify=JSON.parse(values['verify-argv']); }
+    try { if(values['verify-argv']!==undefined)verify=JSON.parse(values['verify-argv']); }
     catch { throw new Error('--verify-argv must be a JSON argv array'); }
     const result=bootstrapProject({
       repoPath:resolve(values.repo),
@@ -106,7 +106,7 @@ try {
   } else if (command === 'validate-host-policy') {
     if (!values['host-policy']) usage(); validateHostPolicy(readJsonFile(resolve(values['host-policy']),'host policy')); process.stdout.write('{"ok":true}\n');
   } else if (command === 'validate-project-policy') {
-    if (!values.repo || !values['policy-sha'] || !values.repository) usage(); const bytes=showFile(resolve(values.repo),values['policy-sha'],'.bridge/project.json'); validateProjectPolicy(parseJsonBytes(bytes,'project policy'),values.repository); process.stdout.write('{"ok":true}\n');
+    if (!values.repo || !values['policy-sha'] || !values.repository) usage(); const bytes=readTrustedProjectPolicyBytes(resolve(values.repo),values['policy-sha'],values.repository); validateProjectPolicy(parseJsonBytes(bytes,'project policy'),values.repository); process.stdout.write('{"ok":true}\n');
   } else usage();
 } catch (error) {
   const envelope = { schemaVersion:1, status:'FAILED', error:errorEnvelope(error), completedAt:new Date().toISOString() };

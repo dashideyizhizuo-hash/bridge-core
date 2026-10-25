@@ -109,7 +109,7 @@ validated Bridge OAuth token
   ∩ GitHub App installation
   ∩ repository selected in GitHub
   ∩ Bridge read/run/publish grant
-  ∩ trusted .bridge/project.json
+  ∩ trusted versioned default profile or optional .bridge/project.json
   ∩ host policy
 ```
 

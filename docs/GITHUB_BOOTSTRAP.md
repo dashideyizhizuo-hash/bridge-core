@@ -6,19 +6,13 @@ Use GitHub engineering bootstrap only when an Agent needs repository source muta
 
 ## Obtain the public CLI
 
-Host npm 0.5.0 does not include `bootstrap-project`; use the public core source
+The Host 0.5.1 archive does not include `bootstrap-project`; use the public core source
 instead. Select an accepted immutable runtime SHA and a clean checkout of
 `https://github.com/dashideyizhizuo-hash/bridge-core`. No private operated-service
 source or published npm core package is required. Node.js 22+ is sufficient for
 this bootstrap CLI; its imports use Node built-in modules.
 
-The explicit-tool interface also requires the trusted default-branch policy's
-fixed `mcp.verification` recipe. It contains 1–4 reviewed entries such as
-`{capability:"verify",parameters:{}}`, each naming a declared `class:"verify"`
-capability and fixed parameter values. Inspect the actual generated policy and
-real verifier command; older bootstrap output missing this recipe is incomplete.
-The model cannot supply its own check list or install policy through a candidate.
-Source preparation does not prove the public runtime or Host 0.5.0 is published.
+When `.bridge/project.json` is absent from the trusted default-branch SHA, Bridge uses the same versioned default profile throughout discovery, execution, editing, verification and publication. It uses runner class `bridge`, bounded argv execution, and existing `agent/**` or `codex/**` edit branches. Default verification is `git diff --check`: report `patch-integrity` and `projectTestsRun=false`, never that project tests passed. An optional advanced policy file, when present, remains authoritative and must validate; invalid custom policy does not silently fall back. Workflows, runner availability, host policy and repository grants must still be checked independently before claiming execution is ready.
 
 The runtime repository and SHA must identify the same accessible source. A SHA
 from an unrelated/private checkout does not become a valid public action pin by
@@ -28,14 +22,13 @@ changing the repository name. Check the source and CI for a newly selected pin.
 
 From the selected Bridge checkout, set `BRIDGE_RUNTIME_SHA`, `RUNNER_CLASS` and
 `RUNNER_SERVICE_USER` from the approved runtime/host inventory. Substitute the
-actual target path and real verifier argv:
+actual target path (runner class `bridge` for the default profile):
 
 ~~~bash
 node bin/bridge-runner.mjs bootstrap-project \
   --bridge-repository dashideyizhizuo-hash/bridge-core \
   --bridge-sha "$BRIDGE_RUNTIME_SHA" \
   --repo /path/to/target-repository \
-  --verify-argv '["npm","test"]' \
   --runner-class "$RUNNER_CLASS" \
   --service-user "$RUNNER_SERVICE_USER"
 ~~~
@@ -58,17 +51,19 @@ Optional overrides:
 --service-user USER
 --bridge-sha <40-hex|current>
 --force
+--verify-argv '["<real>","<quality-gate>"]'  # opts into advanced policy
 ~~~
 
 ## Generated repository files
 
-The command generates:
+Without `--verify-argv`, the command generates only:
 
 ~~~text
-.bridge/project.json
 .github/workflows/bridge-gateway.yml
 .github/workflows/bridge-publish.yml
 ~~~
+
+Explicit `--verify-argv` additionally generates the optional `.bridge/project.json` and its fixed verification recipe. Review existing files; bootstrap does not silently replace advanced policy.
 
 The gateway runner label is rewritten to the selected runner class. The shipped
 template still requires `[self-hosted, linux, x64, <runner-class>]`, Bash and
@@ -129,7 +124,7 @@ Bootstrap is idempotent when generated content already matches.
 
 If one of the managed repository files exists with different content, bootstrap refuses to replace it by default.
 
-Use --force only after reviewing the existing project policy/workflow differences. --force affects the three repository-managed files; it does not bypass host-policy conflict checks.
+Use --force only after reviewing the existing project policy/workflow differences. --force affects only the repository-managed files selected for this bootstrap invocation; it does not bypass host-policy conflict checks.
 
 ## What cannot be automated by a repository file
 
