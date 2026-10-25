@@ -1,9 +1,10 @@
+import {policyProfile} from './default-project-policy.mjs';
 import { createHash } from 'node:crypto';
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import { isAbsolute, resolve, sep } from 'node:path';
 import { assertBridge, BridgeError } from './errors.mjs';
-import { ensureCommit, git, resolveHead, showFile } from './git.mjs';
+import { ensureCommit, git, resolveHead, readTrustedProjectPolicyBytes } from './git.mjs';
 import { parseJsonBytes, readJsonFile } from './json.mjs';
 import { validateEditRequest, validateHostPolicy, validateProjectPolicy } from './validate.mjs';
 
@@ -218,6 +219,7 @@ export function createSharedWorkspaceCandidate({
     policySha: request.policy.sha,
     requestSha256,
     projectPolicySha256: sha256(projectPolicyBytes),
+    policyProfile:policyProfile(JSON.parse(projectPolicyBytes)),
     hostPolicySha256: sha256(hostPolicyBytes),
     candidateSha,
     parentSha,
@@ -242,7 +244,7 @@ export function prepareEditCandidate({ requestPath, repoPath, hostPolicyPath, ou
   assertBridge(head === request.target.sha, 'TARGET_STALE', 'checked out HEAD does not equal edit target SHA', { expected: request.target.sha, actual: head });
   ensureCommit(repo, request.policy.sha, 'POLICY_STALE');
 
-  const projectPolicyBytes = showFile(repo, request.policy.sha, '.bridge/project.json');
+  const projectPolicyBytes = readTrustedProjectPolicyBytes(repo, request.policy.sha, request.repository);
   const projectPolicy = validateProjectPolicy(parseJsonBytes(projectPolicyBytes, 'trusted project policy'), request.repository);
   const hostPolicyBytes = readFileSync(hostPolicyPath);
   const hostPolicy = validateHostPolicy(readJsonFile(hostPolicyPath, 'host policy'));
@@ -297,6 +299,7 @@ export function prepareEditCandidate({ requestPath, repoPath, hostPolicyPath, ou
       policySha: request.policy.sha,
       requestSha256,
       projectPolicySha256: sha256(projectPolicyBytes),
+      policyProfile:policyProfile(JSON.parse(projectPolicyBytes)),
       hostPolicySha256: sha256(hostPolicyBytes),
       candidateSha,
       parentSha,

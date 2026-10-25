@@ -1,3 +1,4 @@
+import {policyProfile} from './default-project-policy.mjs';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -5,7 +6,7 @@ import { performance } from 'node:perf_hooks';
 import { BridgeError, assertBridge } from './errors.mjs';
 import { createExecContext, resolveExecAuthority, resolveExecPlan, runExecInWorkspace } from './exec.mjs';
 import { applyEditOperationsInWorkspace, createSharedWorkspaceCandidate, resolveEditPlan, trackedDiffState } from './edit.mjs';
-import { ensureCommit, resolveHead, showFile } from './git.mjs';
+import { ensureCommit, resolveHead, readTrustedProjectPolicyBytes } from './git.mjs';
 import { readJsonFile, parseJsonBytes } from './json.mjs';
 import { resolvePresetPlan, runPresetInWorkspace } from './preset.mjs';
 import { redactBridgeError, redactResourceText } from './redaction.mjs';
@@ -67,7 +68,7 @@ function baseResult({ request, requestBytes, projectPolicyBytes, startedAt }) {
     targetSha: request.target.sha,
     policySha: request.policy.sha,
     requestSha256: hash(requestBytes),
-    ...(projectPolicyBytes ? { projectPolicySha256: hash(projectPolicyBytes) } : {}),
+    ...(projectPolicyBytes ? { projectPolicySha256: hash(projectPolicyBytes),policyProfile:policyProfile(JSON.parse(projectPolicyBytes)) } : {}),
     startedAt
   };
 }
@@ -139,7 +140,7 @@ export async function executeBatchRequest({ request: rawRequest, requestBytes, r
     const head = resolveHead(repoPath);
     assertBridge(head === request.target.sha, 'TARGET_STALE', 'checked out HEAD does not equal request target SHA', { expected: request.target.sha, actual: head });
     ensureCommit(repoPath, request.policy.sha, 'POLICY_STALE');
-    projectPolicyBytes = showFile(repoPath, request.policy.sha, '.bridge/project.json');
+    projectPolicyBytes = readTrustedProjectPolicyBytes(repoPath, request.policy.sha, request.repository);
     projectPolicy = validateProjectPolicy(parseJsonBytes(projectPolicyBytes, 'trusted project policy'), request.repository);
     hostPolicy = validateHostPolicy(readJsonFile(hostPolicyPath, 'host policy'));
     base = baseResult({ request, requestBytes, projectPolicyBytes, startedAt });
@@ -427,6 +428,7 @@ export async function executeBatchRequest({ request: rawRequest, requestBytes, r
         changedFiles: candidate.changedFiles,
         verificationPlanSha256: hash(JSON.stringify(verification)),
         projectPolicySha256: hash(projectPolicyBytes),
+        policyProfile:policyProfile(JSON.parse(projectPolicyBytes)),
         verificationHostPolicySha256: hash(hostPolicyBytes),
         verifications: verificationRecords,
         completedAt: new Date().toISOString()

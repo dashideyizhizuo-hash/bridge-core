@@ -3,6 +3,7 @@ import { unzipSync } from 'fflate';
 import { assertBridge, BridgeError } from './errors.mjs';
 import { validateTaskBinding } from './task-runtime-binding.mjs';
 import { readBoundedBody } from './cloudflare/request-body.mjs';
+import {defaultProjectPolicy} from './default-project-policy.mjs';
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/;
 const REQUEST_PREFIX = 'bridge/requests/';
@@ -300,8 +301,28 @@ export class GitHubTransport {
     const repo = await this.#authorize(repository, 'read');
     signal?.throwIfAborted();
     const exactSha = sha(policySha, 'policy SHA');
-    const payload = await this.github.request('GET', `/repos/${repo}/contents/.bridge/project.json?ref=${exactSha}`,{signal});
-    return parseJson(decodeContent(payload, 'trusted project policy'), 'trusted project policy');
+    try {
+      const payload = await this.github.request('GET', `/repos/${repo}/contents/.bridge/project.json?ref=${exactSha}`,{signal});
+      return parseJson(decodeContent(payload, 'trusted project policy'), 'trusted project policy');
+    }catch(error){
+      if(error?.code!=='GITHUB_API_ERROR'||error?.details?.status!==404)throw error;
+      // A content 404 can mean revoked access. Prove absence in this exact
+      // commit's non-recursive trees before enabling the built-in profile.
+      const commit=await this.github.request('GET',`/repos/${repo}/git/commits/${exactSha}`,{signal});
+      assertBridge(commit?.sha===exactSha,'GITHUB_TRANSPORT_INVALID','Policy commit mismatch');
+      let treeSha=sha(commit?.tree?.sha,'policy tree SHA');
+      for(const [index,path]of ['.bridge','project.json'].entries()){
+        const tree=await this.github.request('GET',`/repos/${repo}/git/trees/${treeSha}`,{signal});
+        assertBridge(tree?.sha===treeSha&&tree.truncated===false&&Array.isArray(tree.tree),'GITHUB_TRANSPORT_INVALID','Complete policy tree required');
+        const matches=tree.tree.filter(entry=>entry.path===path);
+        assertBridge(matches.length<=1,'GITHUB_TRANSPORT_INVALID','Ambiguous policy tree');
+        if(matches.length===0)return defaultProjectPolicy(repo,exactSha);
+        const entry=matches[0];
+        assertBridge(index===0&&entry.type==='tree'&&entry.mode==='040000','PROJECT_POLICY_INVALID','Existing policy could not be read');
+        treeSha=sha(entry.sha,'policy directory SHA');
+      }
+      throw error;
+    }
   }
 
   async #createRequestControlRef(request) {

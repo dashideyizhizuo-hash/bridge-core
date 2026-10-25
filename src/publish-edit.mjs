@@ -1,9 +1,10 @@
+import {policyProfile} from './default-project-policy.mjs';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { assertBridge, BridgeError } from './errors.mjs';
-import { ensureCommit, git, showFile } from './git.mjs';
+import { ensureCommit, git, readTrustedProjectPolicyBytes } from './git.mjs';
 import { parseJsonBytes } from './json.mjs';
 import { validateBatchRequest, validateEditRequest, validateProjectPolicy } from './validate.mjs';
 
@@ -94,7 +95,7 @@ export function publishEditCandidate({ prepareDir, verificationDir, repoPath, ou
   const repo=realpathSync(resolve(repoPath));
   ensureCommit(repo,prep.baseSha,'BASE_MISSING');
   ensureCommit(repo,prep.policySha,'POLICY_STALE');
-  const projectPolicyBytes=showFile(repo,prep.policySha,'.bridge/project.json');
+  const projectPolicyBytes=readTrustedProjectPolicyBytes(repo, prep.policySha, prep.repository);
   const projectPolicy=validateProjectPolicy(parseJsonBytes(projectPolicyBytes,'trusted project policy'),prep.repository);
   const editing=projectPolicy.editing;
   assertBridge(editing?.enabled===true && editing.publish===true, 'PUBLISH_DENIED', 'trusted project policy does not enable edit publication');
@@ -161,6 +162,7 @@ export function publishEditCandidate({ prepareDir, verificationDir, repoPath, ou
       verificationResultSha256:sha256(verificationBytes),
       requestSha256:prep.requestSha256,
       projectPolicySha256:sha256(projectPolicyBytes),
+      policyProfile:policyProfile(JSON.parse(projectPolicyBytes)),
       completedAt:new Date().toISOString()
     };
     mkdirSync(outputDir,{recursive:true});

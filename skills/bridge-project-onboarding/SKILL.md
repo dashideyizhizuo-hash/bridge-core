@@ -36,12 +36,11 @@ node bin/bridge-runner.mjs bootstrap-project \
   --bridge-repository YOUR-OWNER/YOUR-RUNTIME \
   --bridge-sha "$BRIDGE_RUNTIME_SHA" \
   --repo /path/to/repository \
-  --verify-argv '["<real>","<project>","<quality-gate>"]' \
   --runner-class "$RUNNER_CLASS" \
   --service-user "$RUNNER_SERVICE_USER"
 ```
 
-Bootstrap generates the project policy and pinned gateway/publish workflows.
+Bootstrap without `--verify-argv` generates only the pinned gateway/publish workflows; it does not create `.bridge/project.json`. Use runner class `bridge` for the default profile. Explicit `--verify-argv` selects advanced configuration and generates the optional project file with that reviewed quality gate.
 The actual default service user is `bridge-runner`, not the caller: pass the
 GitHub Actions runner's actual OS account explicitly. Current templates select
 `[self-hosted, linux, x64, <runner-class>]` and read `/etc/bridge/host.json`.
@@ -51,7 +50,7 @@ The merge writes a private file mode, so verify intended runner read access afte
 installation. The administrator-owned policy and parent directory must remain
 unwritable by target code. Existing unrelated entries/resources must be preserved.
 
-Host npm 0.5.0 does not include this bootstrap CLI. Verify the actual Host release
+Host 0.5.1 archive does not include this bootstrap CLI. Verify the actual Host release
 and connected server before installation. Obtain bootstrap from the public
 `dashideyizhizuo-hash/bridge-core` source at an accepted exact SHA; no private
 operated-service source is needed. The runtime repository and SHA must refer to
@@ -59,17 +58,12 @@ the same accessible source. Node.js 22+ suffices for the bootstrap path. Public
 source availability does not authorize changing the runtime repository as an
 acceptance target.
 
-The trusted default-branch policy must explicitly define `mcp.verification` for
-the fixed verification recipe used by `bridge.verify_repository` and
-`bridge.edit_and_verify_repository`. Check the actual generated policy; an older
-bootstrap that omits that recipe is not sufficient for these tools. Configure
-the real required checks through the reviewed default-branch policy, not tool
-arguments or a candidate edit. Missing recipe fails closed.
+When `.bridge/project.json` is absent from the trusted default-branch SHA, Bridge uses the same versioned default profile throughout discovery, execution, editing, verification and publication. It uses runner class `bridge`, bounded argv execution, and existing `agent/**` or `codex/**` edit branches. Default verification is `git diff --check`: report `patch-integrity` and `projectTestsRun=false`, never that project tests passed. An optional advanced policy file, when present, remains authoritative and must validate; invalid custom policy does not silently fall back. Workflows, runner availability, host policy and repository grants must still be checked independently before claiming execution is ready. For an advanced file, explicitly define the trusted `mcp.verification` recipe; candidates and tool arguments cannot replace its required checks.
 
 Bootstrap neither creates a real quality-gate script nor installs project
-dependencies. Supply the actual trusted verifier argv; prepare a repository-owned
+dependencies. When advanced checks are required, supply the actual trusted verifier argv; prepare a repository-owned
 wrapper if a fresh workspace needs dependency installation/tests/builds. Review
-and merge the three generated files into the default branch, then create an
+and merge the two generated workflows (plus the optional advanced policy when selected) into the default branch, then create an
 approved existing remote `agent/**` or `codex/**` target before edit acceptance;
 bootstrap's default edit branch patterns exclude `main`.
 
@@ -130,7 +124,7 @@ Effective authority is the intersection of:
 ```text
 Bridge principal repository grant
     ∩
-trusted repository .bridge/project.json
+trusted versioned default profile or optional repository .bridge/project.json
     ∩
 host-owned /etc/bridge/host.json
     ∩
@@ -481,21 +475,20 @@ Stop if host validation fails.
 
 # 6. Configure the GitHub repository
 
-Every fully onboarded repository should contain:
+Repository execution/publication needs the relevant pinned workflows:
 
 ```text
-.bridge/project.json
 .github/workflows/bridge-gateway.yml
 .github/workflows/bridge-publish.yml
 ```
 
-A repository missing `.bridge/project.json` is not a fully onboarded Bridge project.
+When `.bridge/project.json` is absent from the trusted default-branch SHA, Bridge uses the same versioned default profile throughout discovery, execution, editing, verification and publication. It uses runner class `bridge`, bounded argv execution, and existing `agent/**` or `codex/**` edit branches. Default verification is `git diff --check`: report `patch-integrity` and `projectTestsRun=false`, never that project tests passed. An optional advanced policy file, when present, remains authoritative and must validate; invalid custom policy does not silently fall back. Workflows, runner availability, host policy and repository grants must still be checked independently before claiming execution is ready.
 
 ---
 
-# 7. Trusted project policy: .bridge/project.json
+# 7. Optional advanced project policy: .bridge/project.json
 
-This file is repository-controlled and versioned in Git.
+When custom policy is needed, this optional file is repository-controlled and versioned in Git.
 
 It declares what the project wants Bridge to do.
 
@@ -581,7 +574,7 @@ Do not copy Crypto-specific paths/resources into unrelated repositories.
 
 # 8. Verification preset
 
-Every autonomous coding repository should have at least one trusted `verify` capability.
+The default profile has patch-integrity verification only (`git diff --check`, `projectTestsRun=false`). Configure the following advanced recipe when project tests or other quality gates are required.
 
 Declare the required 1–4 checks and fixed parameter values in
 `mcp.verification`, as in the example above. Each entry must resolve to a
@@ -800,7 +793,7 @@ runner classes
 
 Host filesystem paths must not appear.
 
-A 404 for `.bridge/project.json` means repository onboarding is incomplete.
+An absent `.bridge/project.json` selects the versioned default profile. A repository access error, invalid present policy, or missing runner/workflow authority remains a separate failure.
 
 ---
 
@@ -969,7 +962,7 @@ For repository B:
 1. Decide its runner class/service user.
 2. Add a separate host.json repository entry.
 3. Add only its logical resources.
-4. Add .bridge/project.json.
+4. Inspect the effective default profile; add .bridge/project.json only for approved advanced policy.
 5. Add gateway workflow.
 6. Add publish workflow.
 7. Ensure repository grant = read/run/publish.
@@ -1009,21 +1002,21 @@ Micro Apps
 
 Do not give Micro Apps `cql-data` simply because it uses the same physical host.
 
-If `bridge.get_repository_configuration(micro-apps-infra)` returns missing `.bridge/project.json`, repository onboarding is not complete even if D1 `can_publish=1`.
+For micro-apps-infra, inspect the returned default or advanced profile. D1 `can_publish=1` alone does not prove workflow, runner or host readiness, nor that project-specific quality checks ran.
 
 ---
 
 # 21. Common failure matrix
 
-## `GITHUB_API_ERROR` / `.bridge/project.json` 404
+## Repository access failure or optional policy absence
 
 Meaning:
 
-Repository has not completed project-side Bridge onboarding.
+An absent optional project file selects the default profile. Do not confuse that with denied repository access or an invalid present policy.
 
 Fix:
 
-Add/merge trusted `.bridge/project.json` on the default branch.
+Inspect the actual configuration/profile response and repository authorization. Add an advanced policy only when custom capabilities, limits or project quality checks are intended; do not add a file merely to make discovery work.
 
 ---
 
@@ -1131,8 +1124,8 @@ A new repository is fully onboarded only when all are true:
 [ ] host policy repository entry exists
 [ ] host policy validates
 [ ] required logical resources healthy
-[ ] .bridge/project.json merged on default branch
-[ ] trusted mcp.verification recipe exists and names the real required checks
+[ ] effective versioned default profile inspected, or optional advanced policy merged on default branch
+[ ] verification scope recorded: default patch-integrity/projectTestsRun=false, or advanced reviewed project checks
 [ ] gateway workflow installed
 [ ] publish workflow installed
 [ ] repository grant read=1
@@ -1143,7 +1136,7 @@ A new repository is fully onboarded only when all are true:
 [ ] one workspace proven
 [ ] resource redaction proven
 [ ] edit PASS
-[ ] verify PASS
+[ ] effective-profile verification PASS; do not label default patch-integrity as project tests
 [ ] result VERIFIED
 [ ] bridge.publish(runId) PUBLISHED
 [ ] remote branch HEAD independently equals candidate SHA

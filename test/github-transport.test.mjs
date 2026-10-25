@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { strToU8, zipSync } from 'fflate';
 import { createStaticRepositoryAuthorizer } from '../src/authorization.mjs';
 import { GitHubRestClient, GitHubTransport, parseRunId } from '../src/github-transport.mjs';
+import {defaultProjectPolicy} from '../src/default-project-policy.mjs';
 
 const POLICY='a'.repeat(40);
 const TARGET='b'.repeat(40);
@@ -12,6 +13,24 @@ const REQUEST_TREE='e'.repeat(40);
 const CONTROL='f'.repeat(40);
 const CANDIDATE='1'.repeat(40);
 const REPO='example/project';
+
+test('missing GitHub policy requires an exact complete tree proof; errors and existing entries cannot default',async()=>{
+ const missing=()=>Object.assign(Error('not found'),{code:'GITHUB_API_ERROR',details:{status:404}});
+ function make({contentError=missing(),commitError,entry,inside=false,truncated=false}={}){
+  return new GitHubTransport({authorizer:{assertRepository:async repository=>{assert.equal(repository,REPO);return repository;}},github:{download:async()=>{},request:async(_method,path)=>{
+   if(path.includes('/contents/'))throw contentError;
+   if(path.includes('/git/commits/')){if(commitError)throw commitError;return {sha:POLICY,tree:{sha:POLICY_TREE}};}
+   if(path.includes('/git/trees/'))return {sha:path.split('/').at(-1),truncated,tree:inside&&path.endsWith(POLICY_TREE)?[{path:'.bridge',type:'tree',mode:'040000',sha:BLOB}]:entry?[entry]:[]};
+   throw Error('Unexpected network');
+  }}});
+ }
+ assert.deepEqual(await make().readProjectPolicy(REPO,POLICY),defaultProjectPolicy(REPO,POLICY));
+ assert.deepEqual(await make({inside:true}).readProjectPolicy(REPO,POLICY),defaultProjectPolicy(REPO,POLICY));
+ for(const options of [{contentError:Error('network')},{contentError:Object.assign(Error('forbidden'),{code:'GITHUB_API_ERROR',details:{status:403}})},{commitError:missing()},{truncated:true},{entry:{path:'.bridge',type:'blob',mode:'120000',sha:BLOB}},{inside:true,entry:{path:'project.json',type:'blob',mode:'100644',sha:BLOB}}])
+  await assert.rejects(make(options).readProjectPolicy(REPO,POLICY));
+ await assert.rejects(make().readProjectPolicy(REPO,'main'));
+ await assert.rejects(make().readProjectPolicy('foreign/repository',POLICY));
+});
 
 test('GitHub REST client sends a valid User-Agent for API and artifact requests',async()=>{
   const calls=[];

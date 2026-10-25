@@ -11,6 +11,16 @@ function fixture(){
 }
 const denied=error=>error?.code==='INVALID_MCP_ARGUMENTS';
 
+test('repository discovery preserves default verification scope and unverified execution readiness for the caller',async()=>{
+  const profile={source:'builtin',version:1,verification:'patch-integrity',projectTestsRun:false};
+  const environment={status:'unchecked',requirements:['workflow','runner','host-policy']};
+  const gateway={discover:async()=>({repository:'owner/project',policyProfile:profile,executionEnvironment:environment,privateInternalValue:'not-public'})};
+  const result=await invokePublicTool(gateway,'bridge.get_repository_configuration',{repository:'owner/project'});
+  assert.deepEqual(result.policyProfile,profile);
+  assert.deepEqual(result.executionEnvironment,environment);
+  assert.equal(Object.hasOwn(result,'privateInternalValue'),false);
+});
+
 test('removed aggregate tools and unknown names cannot invoke the gateway',async()=>{
   const f=fixture();
   for(const name of ['bridge.run','bridge.discover','run','__proto__','bridge.custom_preset'])

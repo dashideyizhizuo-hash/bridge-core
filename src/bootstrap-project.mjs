@@ -213,16 +213,18 @@ export function bootstrapProject({
   assertBridge(typeof bridgeRepository==='string'&&REPO.test(bridgeRepository)&&!bridgeRepository.startsWith('example/'),
     'BOOTSTRAP_INVALID','Provide --bridge-repository owner/repo for your accessible Bridge runtime repository');
   const exactBridgeSha=resolveBridgeSha(bridgeSha);
-  const argv=verifyArgv(verify);
-  const policy=projectPolicy({repository:repo,runnerClass,verify:argv});
-  validateProjectPolicy(policy,repo);
+  const argv=verify===undefined?null:verifyArgv(verify);
+  assertBridge(argv!==null||!existsSync(resolve(root,'.bridge','project.json')),'BOOTSTRAP_CONFLICT','An optional advanced policy already exists; review its runner and explicitly supply the advanced verification configuration before updating workflows');
+  assertBridge(argv!==null||runnerClass==='bridge','BOOTSTRAP_INVALID','The built-in profile uses runner class bridge; a custom runner requires explicit advanced verification configuration');
+  const policy=argv===null?null:projectPolicy({repository:repo,runnerClass,verify:argv});
+  if(policy)validateProjectPolicy(policy,repo);
 
   const filePlans=[
-    inspectManaged(
+    ...(policy?[inspectManaged(
       resolve(root,'.bridge','project.json'),
       JSON.stringify(policy,null,2)+'\n',
       {force}
-    ),
+    )]:[]),
     inspectManaged(
       resolve(root,'.github','workflows','bridge-gateway.yml'),
       renderGateway({runnerClass,bridgeSha:exactBridgeSha,bridgeRepository}),
@@ -278,6 +280,7 @@ export function bootstrapProject({
     runnerClass,
     serviceUser,
     verifyArgv:argv,
+    policyMode:policy?'repository':'builtin',
     files,
     hostPolicy,
     next:[

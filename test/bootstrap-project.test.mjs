@@ -9,6 +9,44 @@ import { bootstrapProject } from '../src/bootstrap-project.mjs';
 
 const BRIDGE_SHA='a'.repeat(40);
 
+test('default bootstrap and CLI need no project file or verification arguments',()=>{
+  const f=fixture();
+  try {
+    const result=bootstrapProject({repoPath:f.target,bridgeRepository:'fixture-owner/runtime',bridgeSha:BRIDGE_SHA});
+    assert.equal(result.files.length,2);
+    assert.equal(result.policyMode,'builtin');
+    assert.equal(result.verifyArgv,null);
+    assert.equal(existsSync(join(f.target,'.bridge','project.json')),false);
+    const cli=spawnSync(process.execPath,[resolve('bin/bridge-runner.mjs'),'bootstrap-project','--repo',f.target,'--bridge-sha',BRIDGE_SHA,'--bridge-repository','fixture-owner/runtime'],{encoding:'utf8'});
+    assert.equal(cli.status,0,cli.stderr);
+    assert.equal(JSON.parse(cli.stdout).files.every(file=>!file.changed),true);
+    assert.equal(existsSync(join(f.target,'.bridge','project.json')),false);
+    const policyCheck=spawnSync(process.execPath,[resolve('bin/bridge-runner.mjs'),'validate-project-policy','--repo',f.target,'--policy-sha',git(f.target,['rev-parse','HEAD']),'--repository','example/project'],{encoding:'utf8'});
+    assert.equal(policyCheck.status,0,policyCheck.stderr);
+  } finally { f.cleanup(); }
+});
+
+test('a custom runner without an advanced policy is rejected before creating mismatched workflows',()=>{
+  const f=fixture();
+  try {
+    assert.throws(()=>bootstrapProject({repoPath:f.target,bridgeRepository:'fixture-owner/runtime',bridgeSha:BRIDGE_SHA,runnerClass:'custom'}),{code:'BOOTSTRAP_INVALID'});
+    assert.equal(existsSync(join(f.target,'.github','workflows','bridge-gateway.yml')),false);
+    assert.equal(existsSync(join(f.target,'.bridge','project.json')),false);
+  } finally { f.cleanup(); }
+});
+
+test('default bootstrap cannot mislabel or overwrite an existing advanced setup',()=>{
+  const f=fixture();
+  try {
+    bootstrapProject({repoPath:f.target,verify:['npm','test'],runnerClass:'bridge',bridgeRepository:'fixture-owner/runtime',bridgeSha:BRIDGE_SHA});
+    const policy=readFileSync(join(f.target,'.bridge','project.json'),'utf8');
+    const workflow=readFileSync(join(f.target,'.github','workflows','bridge-gateway.yml'),'utf8');
+    assert.throws(()=>bootstrapProject({repoPath:f.target,bridgeRepository:'fixture-owner/runtime',bridgeSha:BRIDGE_SHA}),{code:'BOOTSTRAP_CONFLICT'});
+    assert.equal(readFileSync(join(f.target,'.bridge','project.json'),'utf8'),policy);
+    assert.equal(readFileSync(join(f.target,'.github','workflows','bridge-gateway.yml'),'utf8'),workflow);
+  } finally { f.cleanup(); }
+});
+
 test('self-hosted bootstrap rejects missing, placeholder and injected runtime repository before writing',()=>{
   const f=fixture();
   try{

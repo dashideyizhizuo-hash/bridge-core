@@ -1,10 +1,11 @@
+import {policyProfile} from './default-project-policy.mjs';
 import { createHash } from 'node:crypto';
 import { lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import { parseJsonBytes, readJsonFile } from './json.mjs';
 import { validateHostPolicy, validateProjectPolicy, validateRequest } from './validate.mjs';
 import { executeBatchRequest } from './batch-runtime.mjs';
-import { ensureCommit, resolveHead, showFile } from './git.mjs';
+import { ensureCommit, resolveHead, readTrustedProjectPolicyBytes } from './git.mjs';
 import { assertBridge, BridgeError } from './errors.mjs';
 import { createExecContext } from './exec.mjs';
 import { resolvePresetPlan, runPresetInWorkspace } from './preset.mjs';
@@ -39,7 +40,7 @@ export async function executeRequest({ requestPath, repoPath, hostPolicyPath, ou
   const head = resolveHead(repoPath);
   assertBridge(head === request.target.sha, 'TARGET_STALE', 'checked out HEAD does not equal request target SHA', { expected: request.target.sha, actual: head });
   ensureCommit(repoPath, request.policy.sha, 'POLICY_STALE');
-  const projectPolicyBytes = showFile(repoPath, request.policy.sha, '.bridge/project.json');
+  const projectPolicyBytes = readTrustedProjectPolicyBytes(repoPath, request.policy.sha, request.repository);
   const projectPolicy = validateProjectPolicy(parseJsonBytes(projectPolicyBytes, 'trusted project policy'), request.repository);
   const hostPolicy = validateHostPolicy(readJsonFile(hostPolicyPath, 'host policy'));
 
@@ -56,6 +57,7 @@ export async function executeRequest({ requestPath, repoPath, hostPolicyPath, ou
       policySha: request.policy.sha,
       requestSha256: hash(requestBytes),
       projectPolicySha256: hash(projectPolicyBytes),
+      policyProfile:policyProfile(JSON.parse(projectPolicyBytes)),
       capability: request.capability,
       runner: { class: plan.runner.class, hostId: plan.hostId },
       execution: {
@@ -97,6 +99,7 @@ export async function executeRequest({ requestPath, repoPath, hostPolicyPath, ou
       policySha: request.policy.sha,
       requestSha256: hash(requestBytes),
       projectPolicySha256: hash(projectPolicyBytes),
+      policyProfile:policyProfile(JSON.parse(projectPolicyBytes)),
       capability: request.capability,
       runner: { class: plan.runner.class, hostId: plan.hostId },
       execution: {

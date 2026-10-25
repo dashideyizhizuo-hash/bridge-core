@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { BridgeGateway } from '../src/gateway.mjs';
 import { MCP_TOOL_DEFINITIONS } from '../src/mcp-tools.mjs';
+import {defaultProjectPolicy} from '../src/default-project-policy.mjs';
 
 const BASE='a'.repeat(40);
 const TARGET='b'.repeat(40);
@@ -284,4 +285,12 @@ test('Gateway delegates task transition only when a task lifecycle is bound',asy
     status:'BLOCKED'
   });
   assert.deepEqual(calls,[input]);
+});
+
+test('built-in discovery is usable without a policy file and does not claim project tests or environment readiness',async()=>{
+ const transport=new FakeTransport(defaultProjectPolicy('example/project',BASE)),gateway=new BridgeGateway({transport});
+ const result=await gateway.discover({repository:'example/project'});
+ assert.equal(result.policyProfile.source,'builtin');assert.equal(result.policyProfile.verification,'patch-integrity');assert.equal(result.policyProfile.projectTestsRun,false);
+ assert.equal(result.executionEnvironment.status,'unchecked');assert.equal(result.exec.enabled,true);assert.equal(result.editing.enabled,true);
+ assert.ok(result.capabilities.some(item=>item.id==='patch-integrity'));
 });

@@ -65,7 +65,7 @@ validated Bridge OAuth token
   ∩ authenticated Bridge principal
   ∩ GitHub App installation
   ∩ repository read/run/publish grant
-  ∩ trusted .bridge/project.json
+  ∩ trusted versioned default profile or optional .bridge/project.json
   ∩ host-owned /etc/bridge/host.json
   ∩ runtime and task-fencing rules
 ```
@@ -215,11 +215,13 @@ See [Durable Task Runtime](docs/DURABLE_TASK_RUNTIME.md).
 
 ## Canonical configuration
 
-Target repository:
+Optional advanced policy in the target repository:
 
 ```text
 .bridge/project.json
 ```
+
+When `.bridge/project.json` is absent from the trusted default-branch SHA, Bridge uses the same versioned default profile throughout discovery, execution, editing, verification and publication. It uses runner class `bridge`, bounded argv execution, and existing `agent/**` or `codex/**` edit branches. Default verification is `git diff --check`: report `patch-integrity` and `projectTestsRun=false`, never that project tests passed. An optional advanced policy file, when present, remains authoritative and must validate; invalid custom policy does not silently fall back. Workflows, runner availability, host policy and repository grants must still be checked independently before claiming execution is ready.
 
 Runner host:
 

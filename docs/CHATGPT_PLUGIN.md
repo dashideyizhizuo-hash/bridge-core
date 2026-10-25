@@ -42,7 +42,7 @@ is a model input.
 | Inspect repository setup | `bridge.get_repository_configuration` | Exact `repository` |
 | Inspect project-tool availability | `bridge.repository_tools_status` | None |
 | Run repository commands | `bridge.execute_repository_commands` | Repository/target, `expectedPolicySha`, command records |
-| Run required project checks | `bridge.verify_repository` | Repository/target, `expectedPolicySha` |
+| Run the effective profile verification | `bridge.verify_repository` | Repository/target, `expectedPolicySha` |
 | Edit and verify | `bridge.edit_and_verify_repository` | Same identities, bounded text edits, commit subject |
 | Inspect task state | `bridge.get_run` | Actual `runId` |
 | Read evidence and output files | `bridge.get_result` | Actual `runId` |
@@ -112,10 +112,7 @@ ticket deadline; it differs from the native import/export expiry.
 2. Use `bridge.execute_repository_commands` for 1–16 records with unique IDs,
    argv, relative cwd, logical resources and bounded timeouts. It accepts commands
    only and produces no publishable candidate. It does not accept mixed steps.
-3. The trusted default policy must declare `mcp.verification`: 1–4 fixed entries
-   such as `{capability:"verify",parameters:{}}`, each referring to a declared
-   `class:"verify"` preset with reviewed fixed parameters and the real quality gate.
-   `bridge.verify_repository` runs that recipe. Missing or stale recipe is an error.
+3. When `.bridge/project.json` is absent from the trusted default-branch SHA, Bridge uses the same versioned default profile throughout discovery, execution, editing, verification and publication. It uses runner class `bridge`, bounded argv execution, and existing `agent/**` or `codex/**` edit branches. Default verification is `git diff --check`: report `patch-integrity` and `projectTestsRun=false`, never that project tests passed. An optional advanced policy file, when present, remains authoritative and must validate; invalid custom policy does not silently fall back. Workflows, runner availability, host policy and repository grants must still be checked independently before claiming execution is ready. For an advanced file, `mcp.verification` declares the reviewed fixed recipe; missing or invalid advanced checks fail closed.
 4. `bridge.edit_and_verify_repository` applies bounded `replace-exact` /
    `apply-patch` modifications to existing tracked text files and runs the same
    mandatory checks. The caller cannot substitute verification or authorize from
