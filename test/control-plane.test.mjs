@@ -190,7 +190,7 @@ test('request-scoped discover uses only a read-scoped installation credential',a
   assert.deepEqual(discovered.policy,{ref:'main',sha:BASE});
   assert.deepEqual(
     credentialProvider.calls.map(call=>call.permission),
-    ['read','read']
+    ['read']
   );
   assert.ok(github.calls.length>=3);
   assert.ok(github.calls.every(call=>call.authorization==='Bearer credential-read'));
@@ -223,7 +223,7 @@ test('request-scoped run upgrades only the submission phase to run authority',as
 
   assert.deepEqual(
     credentialProvider.calls.map(call=>call.permission),
-    ['read','read','read','run']
+    ['read','read','run']
   );
 
   const readCalls=github.calls.filter(call=>call.authorization==='Bearer credential-read');
@@ -280,7 +280,7 @@ test('request-scoped batch run delegates submission with run authority',async()=
 
   assert.deepEqual(
     credentialProvider.calls.map(call=>call.permission),
-    ['read','read','read','run']
+    ['read','read','run']
   );
 
   const dispatch=github.calls.find(

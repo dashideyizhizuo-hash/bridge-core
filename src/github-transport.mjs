@@ -270,18 +270,32 @@ export class GitHubTransport {
     return names;
   }
 
-  async resolveRepository(repository,{signal}={}) {
+  async #resolveRepository(repository,{signal}={}) {
     signal?.throwIfAborted();
     const repo = await this.#authorize(repository, 'read');
     signal?.throwIfAborted();
     const metadata = await this.github.request('GET', `/repos/${repo}`,{signal});
     assertBridge(typeof metadata?.default_branch === 'string' && metadata.default_branch.length > 0, 'GITHUB_TRANSPORT_INVALID', 'repository has no default branch');
     const commit = await this.github.request('GET', `/repos/${repo}/commits/${encodeURIComponent(metadata.default_branch)}`,{signal});
-    return {
+    const info = {
       repository: repo,
       defaultRef: metadata.default_branch,
       defaultSha: sha(commit?.sha, 'default branch SHA')
     };
+    // This hint comes only from the just-resolved trusted commit, never tool
+    // input or a cross-request authorization cache.
+    const treeSha=commit?.commit?.tree?.sha;
+    return {info,treeSha:treeSha===undefined?null:sha(treeSha,'default commit tree SHA')};
+  }
+
+  async resolveRepository(repository,options={}) {
+    return (await this.#resolveRepository(repository,options)).info;
+  }
+
+  async readTrustedRepositoryContext(repository,options={}) {
+    const resolved=await this.#resolveRepository(repository,options);
+    const policy=await this.#readProjectPolicy(repository,resolved.info.defaultSha,options,resolved.treeSha);
+    return {info:resolved.info,policy};
   }
 
   async resolveTarget(repository, { ref, sha: assertedSha }) {
@@ -297,6 +311,10 @@ export class GitHubTransport {
   }
 
   async readProjectPolicy(repository, policySha,{signal}={}) {
+    return this.#readProjectPolicy(repository,policySha,{signal},null);
+  }
+
+  async #readProjectPolicy(repository,policySha,{signal}={},trustedTreeSha=null) {
     signal?.throwIfAborted();
     const repo = await this.#authorize(repository, 'read');
     signal?.throwIfAborted();
@@ -308,9 +326,12 @@ export class GitHubTransport {
       if(error?.code!=='GITHUB_API_ERROR'||error?.details?.status!==404)throw error;
       // A content 404 can mean revoked access. Prove absence in this exact
       // commit's non-recursive trees before enabling the built-in profile.
-      const commit=await this.github.request('GET',`/repos/${repo}/git/commits/${exactSha}`,{signal});
-      assertBridge(commit?.sha===exactSha,'GITHUB_TRANSPORT_INVALID','Policy commit mismatch');
-      let treeSha=sha(commit?.tree?.sha,'policy tree SHA');
+      let treeSha=trustedTreeSha;
+      if(treeSha===null){
+        const commit=await this.github.request('GET',`/repos/${repo}/git/commits/${exactSha}`,{signal});
+        assertBridge(commit?.sha===exactSha,'GITHUB_TRANSPORT_INVALID','Policy commit mismatch');
+        treeSha=sha(commit?.tree?.sha,'policy tree SHA');
+      }
       for(const [index,path]of ['.bridge','project.json'].entries()){
         const tree=await this.github.request('GET',`/repos/${repo}/git/trees/${treeSha}`,{signal});
         assertBridge(tree?.sha===treeSha&&tree.truncated===false&&Array.isArray(tree.tree),'GITHUB_TRANSPORT_INVALID','Complete policy tree required');

@@ -156,10 +156,22 @@ export class RequestScopedGitHubTransport {
       fetchImpl: this.fetchImpl,
       apiBase: this.apiBase
     });
+    const exactAuthorizer=exactRepositoryAuthorizer(repo,requestedPermission);
+    const liveAuthorizer={assertRepository:async(repository,permission)=>{
+      await exactAuthorizer.assertRepository(repository,permission);
+      signal?.throwIfAborted();
+      const current=await this.principalRepositoryAuthorizer.assert({principal:this.principal,repository:repo,permission:requestedPermission,...(signal?{signal}:{})});
+      signal?.throwIfAborted();
+      assertBridge(current===repo,'REPOSITORY_DENIED','Repository authorization changed');
+      const installation=await this.installationResolver.resolve({principal:this.principal,repository:repo,...(signal?{signal}:{})});
+      signal?.throwIfAborted();
+      assertBridge(installationId(installation?.installationId)===resolvedInstallationId,'GITHUB_APP_CREDENTIAL_INVALID','Repository installation changed during this request');
+      return repo;
+    }};
     return new GitHubTransport({
       github,
-      authorizer: exactRepositoryAuthorizer(repo, requestedPermission),
       ...this.githubTransportOptions,
+      authorizer:liveAuthorizer,
       taskLeaseValidator:this.taskLeaseValidator
     });
   }
@@ -171,6 +183,10 @@ export class RequestScopedGitHubTransport {
 
   async resolveRepository(repository, options={}) {
     return (await this.#transportFor(repository, 'read',options)).resolveRepository(repository,options);
+  }
+
+  async readTrustedRepositoryContext(repository,options={}) {
+    return (await this.#transportFor(repository,'read',options)).readTrustedRepositoryContext(repository,options);
   }
 
   async resolveTarget(repository, target) {
