@@ -6,6 +6,21 @@ Its purpose is:
 
 > Let an AI use configured compute, local/private data and development environments without giving the model SSH, arbitrary host filesystem authority, long-lived repository credentials or direct runner connectivity.
 
+## Demo and release status
+
+[Watch the Bridge review demo](https://www.youtube.com/watch?v=64Kp8i5HhOk).
+The recording shows the operated Bridge service. This repository provides the
+self-deployable core under Elastic License 2.0; the hosted account console,
+commercial metering and payment integrations remain separate. The video does
+not establish public plugin approval or acceptance of every deployment.
+
+As checked on 2026-10-27, the published npm Host `latest` version is **0.5.0**.
+This source tree prepares **0.5.1**, which is not yet published to npm. See the
+[Host quickstart](docs/HOST_QUICKSTART.md) to build it locally and select your own
+HTTPS endpoint. The source-built package uses a non-live placeholder default;
+do not treat it as the operated service's registry artifact or overwrite an
+existing npm version.
+
 ## Current architecture
 
 Bridge exposes one MCP surface over two execution planes:
@@ -23,12 +38,13 @@ ChatGPT / Codex
 
 Direct Exec is the simple default for ordinary host commands and local tools. GitHub Exec remains the durable engineering path for source mutation, trusted verification and publication. Neither path requires an inbound public port on the host.
 
-The explicit-tool release candidate separates Host discovery, pairing, execution
+The explicit-tool contract separates Host discovery, pairing, execution
 controls, commands, temporary files and repository work into 17 fixed tools.
 Trusted additional project presets have independently declared input schemas.
 See [the MCP contract](docs/CHATGPT_PLUGIN.md) for the complete tool list.
-This is source preparation; verify the actual deployed tool inventory and the
-Host 0.5.0 candidate before claiming installation or runtime acceptance.
+Verify the actual deployed tool inventory and the exact Host artifact before
+claiming installation or runtime acceptance; source and registry release
+versions are tracked separately above.
 
 ```text
 bridge.list_hosts -> bridge.run_host_command
