@@ -5,6 +5,12 @@ is source preparation, not a claim that a registry package was published or a
 particular self-hosted service was deployed. Build and inspect your local
 artifact, choose your own endpoint and test its actual tool inventory.
 
+[Review demo video](https://www.youtube.com/watch?v=64Kp8i5HhOk): this is the
+operated service demonstration, not a public plugin approval notice. Hosted
+account management and commercial usage features shown there are outside this
+core distribution. The published npm Host `latest` is 0.5.0 as checked on
+2026-10-27; this tree's 0.5.1 source candidate is not yet a registry release.
+
 ## Package, deployment and authority
 
 The three Skills teach when to use the configured Bridge MCP service. They do
