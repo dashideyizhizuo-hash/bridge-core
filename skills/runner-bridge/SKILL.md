@@ -98,6 +98,13 @@ Direct Exec 的 stdout/stderr 契约是 UTF-8。`whoami /user`、`whoami /all`
 用户名正常。遇到 `OUTPUT_ENCODING_INVALID` 时，先确认命令是否已经产生副作用；
 只有只读或可安全重试的操作才改编码后重新执行。不要猜编码或把乱码当事实。
 
+文件演示、字节复制、摘要和回读使用 Node.js 内置 API。UTF-8 文件读写不会自动
+设置 Windows PowerShell 5.1 的输出编码；确需 PowerShell 时，在输出前设置
+`[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); $OutputEncoding=[Console]::OutputEncoding`。
+默认输出可能把表情替换为合法 ASCII `??`，因此严格 UTF-8 校验、退出码 0 和
+文件摘要一致都不能单独证明 stdout 正确。保留旧回执，用新的只读回读定位差异，
+不要重跑原来的文件创建任务或修改原件来修饰结果。
+
 优先使用程序自己的 UTF-8 选项（例如 `python -X utf8`）。对于已确定的只读
 `whoami` 查询，可以显式使用以下 argv；这是调用方选择的固定命令，不是 Bridge
 自动把任意 argv 拼成 shell 字符串：
