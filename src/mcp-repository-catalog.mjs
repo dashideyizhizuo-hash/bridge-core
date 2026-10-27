@@ -88,7 +88,7 @@ async function buildRepositoryToolCatalog(gateway,{requestedTool,signal}={}) {
   return {status:errors.length?'partial':'ready',definitions:requestedTool?definitions.filter(item=>item.name===requestedTool):definitions,errors,repositories};
 }
 
-export async function repositoryToolCatalog(gateway,{signal,timeoutMs=8000,...options}={}) {
+export async function repositoryToolCatalog(gateway,{signal,timeoutMs=12000,...options}={}) {
   const cancellation=new AbortController(),combined=signal?AbortSignal.any([signal,cancellation.signal]):cancellation.signal;
   let timer;
   const timeout=new Promise(resolve=>{timer=setTimeout(()=>{

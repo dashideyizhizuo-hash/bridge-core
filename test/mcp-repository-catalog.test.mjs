@@ -231,14 +231,32 @@ test('cold catalog construction has at most three concurrent repository policy r
   assert.equal(maximum,3);assert.equal(catalog.status,'ready');assert.equal(catalog.definitions.length,8);
 });
 
-test('cold catalog deadline aborts further loads and exposes no partially completed tools',async t=>{
+test('cold catalog accepts nine-second asynchronous metadata within its twelve-second budget',async t=>{
   t.mock.timers.enable({apis:['setTimeout']});
-  let release,entered,aborted=false;const gate=new Promise(resolve=>{release=resolve;}),threeStarted=new Promise(resolve=>{entered=resolve;});
+  let entered;const started=new Promise(resolve=>{entered=resolve;}),f=catalogGateway();
+  f.gateway.discover=async({repository,signal})=>{f.calls.discover.push(repository);entered();await new Promise(resolve=>setTimeout(resolve,9000));signal.throwIfAborted();return configuration(repository);};
+  const pending=repositoryToolCatalog(f.gateway);await started;t.mock.timers.tick(9000);
+  const result=await pending;assert.equal(result.status,'ready');assert.equal(result.definitions.length,1);
+});
+
+test('cold catalog twelve-second deadline aborts pending loads and discards already completed tools',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  let entered,aborted=0,settled=false;const threeStarted=new Promise(resolve=>{entered=resolve;});
   const f=catalogGateway({repositories:Array.from({length:8},(_,i)=>'owner/project-'+i)});
-  f.gateway.discover=async({repository,signal})=>{f.calls.discover.push(repository);if(f.calls.discover.length===3)entered();await gate;aborted=signal.aborted;return configuration(repository);};
-  const pending=repositoryToolCatalog(f.gateway);await threeStarted;t.mock.timers.tick(8000);const result=await pending;
+  f.gateway.discover=async({repository,signal})=>{
+    f.calls.discover.push(repository);if(f.calls.discover.length===3)entered();
+    if(repository.endsWith('-0'))return configuration(repository);
+    await new Promise((resolve,reject)=>signal.addEventListener('abort',()=>{aborted++;reject(signal.reason);},{once:true}));
+    return configuration(repository);
+  };
+  const pending=repositoryToolCatalog(f.gateway).then(result=>{settled=true;return result;});
+  await threeStarted;await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.calls.discover.length,4,'one completed plus three pending; remaining repositories stay queued');
+  t.mock.timers.tick(11999);await new Promise(resolve=>setImmediate(resolve));assert.equal(settled,false);
+  t.mock.timers.tick(1);const result=await pending;
   assert.equal(result.status,'unavailable');assert.deepEqual(result.definitions,[]);assert.equal(result.errors[0].code,'MCP_CATALOG_TIMEOUT');
-  release();await new Promise(resolve=>setImmediate(resolve));assert.equal(aborted,true);assert.equal(f.calls.discover.length,3);
+  assert.equal(aborted,3);await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.calls.discover.length,4,'timeout must not start the four queued repositories');
 });
 
 test('catalog metadata byte ceiling refuses the whole executable catalog',async()=>{
