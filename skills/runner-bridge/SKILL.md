@@ -62,17 +62,24 @@ Use GitHub-backed Bridge only when the task requires source mutation, exact comm
 
 1. Identify the exact target repository.
 2. Use `bridge.repository_tools_status` when repository tools are unavailable;
-   it reports missing policy and the bounded extra-tool catalog without blocking
-   ordinary Host operations. Call `bridge.get_repository_configuration(repository)` and retain its exact
-   trusted policy SHA. Resolve the intended existing target ref/SHA.
+   it reports connection/catalog errors without blocking ordinary Host operations.
+   Call `bridge.get_repository_configuration(repository)` for the authorized
+   repository and retain its exact trusted policy SHA. An absent optional
+   `.bridge/project.json` selects the built-in profile; do not require creating
+   that file or running bootstrap just to inspect repository configuration.
+   Check workflow, runner and Host-policy readiness separately before execution.
+   Resolve the intended existing target ref/SHA.
 3. Execute one or more bounded argv commands with
    `bridge.execute_repository_commands`; every command has an explicit ID.
    Include the returned policy identity as `expectedPolicySha`, then retain
    the actual Run identity returned for that submission. If its first response
    is lost, inspect execution and side effects before deciding to submit again.
-4. Use `bridge.verify_repository` for the fixed trusted `mcp.verification`
-   recipe, or `bridge.edit_and_verify_repository` for bounded edits followed by
-   that same mandatory recipe. Missing recipe or changed policy is a setup error.
+4. Use `bridge.verify_repository` for the effective trusted profile's fixed
+   verification, or `bridge.edit_and_verify_repository` for bounded edits followed
+   by those checks. Without an advanced project file, verification is only
+   `git diff --check`: report `patch-integrity` and `projectTestsRun=false`, never
+   that project tests passed. A present advanced policy must declare a valid
+   `mcp.verification` recipe. Invalid advanced checks or changed policy fail closed.
    The caller does not supply capabilities, verification lists or mixed steps.
 5. If a trusted preset is separately exposed in the current tool list, use its
    actual server-generated name and closed input schema. Refresh tool discovery
