@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
+import {request as nodeRequest} from 'node:http';
 import {
   createNodeRemoteBridgeApplication,
   createRemoteBridgeHttpServer,
@@ -141,6 +142,24 @@ test('Node HTTP adapter binds independently of runner hosts',async t=>{
 
   await service.close();
   assert.equal(closed,true);
+});
+
+test('Node HTTP adapter rejects an oversized body before invoking application routing',async t=>{
+ let calls=0;
+ const service=createRemoteBridgeHttpServer({webApplication:{async fetch(){calls++;return new Response('ok');},async close(){}},host:'127.0.0.1',port:0});
+ const address=await service.listen();t.after(()=>service.close());
+ const origin='http://127.0.0.1:'+address.port;
+ // Advertise the oversized body without sending it: the adapter must reject
+ // its declared length before reading payload bytes or invoking the app.
+ const status=await new Promise((resolve,reject)=>{
+  const request=nodeRequest(origin+'/mcp',{method:'POST',headers:{'content-type':'application/json','content-length':String(4*1024*1024+1)}},response=>{
+   response.resume();response.once('end',()=>resolve(response.statusCode));
+  });
+  request.once('error',reject);request.setTimeout(2000,()=>request.destroy(new Error('Oversized request was not rejected promptly')));request.end();
+ });
+ assert.equal(status,413);assert.equal(calls,0);
+ const bounded=await fetch(origin+'/mcp',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});
+ assert.equal(bounded.status,200);assert.equal(await bounded.text(),'ok');assert.equal(calls,1);
 });
 
 test('Node remote application composes runtime/key adapters without changing protected MCP behavior',async t=>{
