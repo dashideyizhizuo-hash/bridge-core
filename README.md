@@ -14,8 +14,8 @@ self-deployable core under Elastic License 2.0; the hosted account console,
 commercial metering and payment integrations remain separate. The video does
 not establish public plugin approval or acceptance of every deployment.
 
-As checked on 2026-10-27, the published npm Host `latest` version is **0.5.0**.
-This source tree prepares **0.5.1**, which is not yet published to npm. See the
+As checked on 2026-11-08, the published npm Host `latest` version is **0.6.0**.
+This source tree also builds **0.6.0** for self-deployment. See the
 [Host quickstart](docs/HOST_QUICKSTART.md) to build it locally and select your own
 HTTPS endpoint. The source-built package uses a non-live placeholder default;
 do not treat it as the operated service's registry artifact or overwrite an

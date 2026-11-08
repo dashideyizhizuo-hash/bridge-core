@@ -1,15 +1,16 @@
 # ChatGPT / Codex package
 
-This document specifies the explicit-tool core release candidate. Host 0.5.1
-is source preparation, not a claim that a registry package was published or a
+This document specifies the explicit-tool core distribution. This tree builds
+Host 0.6.0 for self-deployment; source availability does not establish that a
 particular self-hosted service was deployed. Build and inspect your local
 artifact, choose your own endpoint and test its actual tool inventory.
 
 [Review demo video](https://www.youtube.com/watch?v=64Kp8i5HhOk): this is the
 operated service demonstration, not a public plugin approval notice. Hosted
 account management and commercial usage features shown there are outside this
-core distribution. The published npm Host `latest` is 0.5.0 as checked on
-2026-10-27; this tree's 0.5.1 source candidate is not yet a registry release.
+core distribution. The published npm Host `latest` is 0.6.0 as checked on
+2026-11-08. Source-built packages retain a non-live placeholder default and
+must be configured with your own endpoint.
 
 ## Package, deployment and authority
 
