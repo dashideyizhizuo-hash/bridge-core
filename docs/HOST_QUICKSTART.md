@@ -1,16 +1,16 @@
 # Bridge Host — self-deployment
 
-This source prepares the `@dashideyizhizuo/bridge-host@0.5.1` candidate for your own Bridge deployment. Build the local archive below and explicitly select your self-hosted endpoint. The source-built package has a non-live placeholder default; do not overwrite or republish an existing registry version. Node.js 22+ and npm remain prerequisites; Bridge does not install Node or require Wrangler or Cloudflare credentials on customer hosts. Source preparation does not establish registry availability or production acceptance.
+This source prepares the `@dashideyizhizuo/bridge-host@0.6.0` candidate for your own Bridge deployment. Build the local archive below and explicitly select your self-hosted endpoint. The source-built package has a non-live placeholder default; do not overwrite or republish an existing registry version. Node.js 22+ and npm remain prerequisites; Bridge does not install Node or require Wrangler or Cloudflare credentials on customer hosts. Source preparation does not establish registry availability or production acceptance.
 
-Registry status checked on 2026-10-27: the published Host `latest` is **0.5.0**;
-**0.5.1 is not published**. The commands below use a local source-built archive,
+Registry status checked on 2026-11-08: the published Host `latest` is **0.5.1**;
+**0.6.0 is a source candidate, not yet a registry release**. The commands below use a local source-built archive,
 not an assumed registry release. The [review demo](https://www.youtube.com/watch?v=64Kp8i5HhOk)
 shows the operated service; its account console and billing are not part of this core.
 
 ```sh
 npm run host:package
 npm pack ./dist/bridge-host-package --pack-destination ./dist
-npm install --ignore-scripts ./dist/dashideyizhizuo-bridge-host-0.5.1.tgz
+npm install --ignore-scripts ./dist/dashideyizhizuo-bridge-host-0.6.0.tgz
 npm exec --offline --no -- bridge-host setup --endpoint https://YOUR-BRIDGE-HOST/mcp
 ```
 
@@ -25,15 +25,15 @@ Confirm current-user command execution, authorize in the browser, then the CLI p
 | Native Windows | Task Scheduler, current user's login/interactive session, LUA run level; no password, UAC request or LocalSystem service |
 | macOS (preview) | User LaunchAgent in `~/Library/LaunchAgents`; no system daemon |
 | Linux / WSL with an available systemd user manager | Existing systemd USER service adapter |
-| No usable background manager | Clearly reported foreground fallback, not a fake installed/running service |
+| No usable background manager | Windows setup fails before pairing; Linux may announce a foreground fallback. Foreground operation needs its terminal. |
 
-A missing supervisor is no longer an onboarding prerequisite. The foreground mode is deliberately first-class:
+Windows setup requires its user-level background manager. Foreground mode remains an explicit troubleshooting or unsupported-environment choice:
 
 ```sh
 npm exec --offline --no -- bridge-host --endpoint https://YOUR-BRIDGE-HOST/mcp --foreground
 ```
 
-It pairs on first use, starts the runner in that terminal, and keeps running. Keep the terminal open; Ctrl+C stops execution without deleting the Host ID or local credential. Run the same command to reconnect with the same identity. A closed terminal, logged-out user, stopped WSL distribution, sleeping or powered-off computer cannot execute new commands. Foreground operation is not reboot persistence.
+It pairs on first use, starts the runner in that terminal, and keeps running. Keep that foreground terminal open; Ctrl+C stops its execution without deleting the Host ID or local credential. Run the same command to reconnect with the same identity. Closing a foreground terminal stops only that foreground session. A managed background Host continues after its installer or start-command terminal closes. A logged-out user, stopped WSL distribution, sleeping or powered-off computer cannot execute new commands. Foreground operation is not reboot persistence.
 
 `--background` requires a working native user supervisor and fails rather than silently falling back. `--no-service` preserves the old config-only behavior: pair but do not start. Modes are mutually exclusive. A conflicting/edited service, unsafe state, partial claim or failed service startup does **not** silently fall back. Repair or stop the installed service before choosing foreground. WSL never silently switches to a Windows service: that would change the OS execution identity and filesystem boundary.
 
@@ -55,10 +55,18 @@ use `bridge-host stop`; the desktop account must remain signed in and awake.
 
 ```sh
 npm exec --offline --no -- bridge-host status
+npm exec --offline --no -- bridge-host start
 npm exec --offline --no -- bridge-host stop
 ```
 
 These commands concern the **managed background registration**, not arbitrary processes. Stop disables/stops it while retaining identity; foreground is stopped with Ctrl+C. launchd/systemd supervise their own user processes. The CLI does not start WSL from Windows boot, enable login lingering, guarantee operation after logout, or alter system power settings. A live Windows launcher may be backing off before a child restart; task-active is not proof of a successful Bridge connection.
+
+Normal `start` resumes the exact installed background runtime and preserves the
+automatic-start setting. It returns only after local daemon readiness; its
+terminal may then close. It never opens authorization, creates another Host or
+silently upgrades a runtime. Missing registrations require `setup --background`;
+legacy Windows launchers require explicit upgrade before terminal-independent
+start. Use `start --foreground` only for an intentionally terminal-bound session.
 
 ## Automatic startup and current activity
 
@@ -84,9 +92,16 @@ not a guessed disabled state.
 | `autostart off` | Unchanged | Disabled |
 | `stop` | Stopped | Disabled, preserving existing command behavior |
 | `setup --background` | Started | Enabled |
-| `start` / `--foreground` | Runs in this terminal | Does not change the setting |
+| `start` | Starts in the background; safe to close its terminal after ready | Unchanged |
+| `start --foreground` | Runs in this terminal | Unchanged |
 
 Windows automatic startup means **after this user signs in**, not before login.
+Its verified logon trigger controls automatic startup independently of demand
+start. Disabling automatic startup never silently turns on again during manual
+start. An explicit stop waits for owned-process exit and disables future startup;
+invalid local diagnostics cannot prevent the owned task from being stopped.
+Disabled and unloaded experimental macOS agents report that they must be enabled
+before start rather than silently changing the persisted preference.
 Linux needs its existing systemd user manager. WSL must already be running; Bridge
 does not start the distribution from Windows boot or enable lingering. Sleeping or
 powered-off computers cannot execute commands. macOS LaunchAgents also support independent autostart controls in the current user's graphical login session. A machine without that session must use foreground mode.

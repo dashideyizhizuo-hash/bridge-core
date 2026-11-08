@@ -169,6 +169,19 @@ export function stopHostService(paths,{exec}={}) {
   return {stopped:true,credentialsRetained:true};
 }
 
+export function startHostService(paths,options={}) {
+  const before=hostServiceStatus(paths,options);
+  assertBridge(before.installed && existsSync(paths.receiptPath),'HOST_SERVICE_UNAVAILABLE','No owned Host service is installed; run setup --background first');
+  assertBridge(typeof before.autostartEnabled==='boolean','HOST_SERVICE_FAILED','Could not read the current autostart setting; the service was not started');
+  if(before.active) return before;
+  // Demand start must not rewrite the unit, replace its runtime, or enable it.
+  assertBridge(runSystemctl(['start',paths.unitName],options).status===0,
+    'HOST_SERVICE_FAILED','Could not start the owned Host service; its identity and autostart setting are retained');
+  const after=hostServiceStatus(paths,options);
+  assertBridge(after.autostartEnabled===before.autostartEnabled,'HOST_SERVICE_FAILED','Could not verify the unchanged Host autostart setting');
+  return after;
+}
+
 // Explicit maintenance only; preserve identity, immutable runtimes and journals.
 export function removeHostService(paths,options={}) {
   ownedService(paths);

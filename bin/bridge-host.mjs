@@ -9,7 +9,7 @@ import { runForeground } from '../src/host-runner.mjs';
 import { doctor } from '../src/doctor.mjs';
 import { errorEnvelope, BridgeError, assertBridge } from '../src/errors.mjs';
 import { setupHost, hostConfigDir } from '../src/host-onboarding.mjs';
-import { persistenceStatus, stopPersistence, setPersistenceAutostart } from '../src/host-persistence.mjs';
+import { persistenceStatus, startPersistence, stopPersistenceAndWait, setPersistenceAutostart } from '../src/host-persistence.mjs';
 import { maintainHost } from '../src/host-maintenance.mjs';
 import { HOST_VERSION, HOST_PACKAGE_NAME, DEFAULT_HOST_ENDPOINT } from '../src/host-package-spec.mjs';
 
@@ -17,7 +17,8 @@ const HELP=`Bridge Host ${HOST_VERSION}
 Usage:
   bridge-host [setup] [--yes] [--foreground | --background | --no-service]
   bridge-host connect [--pairing-token TOKEN | --pairing-token-file FILE]
-  bridge-host start [--poll-ms N] [--once]
+  bridge-host start [--background]
+  bridge-host start --foreground [--poll-ms N] [--once]
   bridge-host doctor | status | stop
   bridge-host autostart on | off | status
   bridge-host upgrade | rollback | uninstall [--yes]
@@ -33,7 +34,9 @@ Without an available background manager, default setup runs in the foreground.
 --yes consents to command execution with current-user rights and the chosen mode.
 --no-browser prints an authorization URL to open on this same computer.
 Advanced: --endpoint HTTPS_MCP_URL, --config-dir DIR, --login-timeout SECONDS.
-Explicit-token connect only pairs. start uses an existing identity in foreground.
+Explicit-token connect only pairs. start resumes the installed background Host
+without pairing again or changing automatic startup. Its terminal may close.
+Use --foreground only when you intentionally want a terminal-bound session.
 status shows current activity and automatic-start settings separately.
 stop retains its existing behavior: stop the background service AND disable autostart.
 autostart on/off changes future automatic startup only; it does not start/stop now.
@@ -70,6 +73,9 @@ try {
     assertBridge(['setup','connect','start','doctor','status','stop','upgrade','rollback','uninstall','autostart'].includes(command),'HOST_USAGE_INVALID','Unknown command; see --help');
     assertBridge([values.foreground,values.background,values['no-service']].filter(Boolean).length<=1,
       'HOST_USAGE_INVALID','Choose only one of --foreground, --background and --no-service');
+    assertBridge(command!=='start' || (!values['no-service'] && (values.foreground ||
+      (values['poll-ms']===undefined && values.once!==true))),
+      'HOST_USAGE_INVALID','Use start --foreground for --poll-ms or --once; normal start runs in the background');
     const configDir=values['config-dir'] ? resolve(values['config-dir']) : hostConfigDir();
     const pollMs=values['poll-ms']===undefined ? 15000 : Number(values['poll-ms']);
     assertBridge(Number.isSafeInteger(pollMs) && pollMs>=1000 && pollMs<=60_000,'HOST_USAGE_INVALID','Poll interval must be 1000-60000 milliseconds');
@@ -82,7 +88,7 @@ try {
       delete process.env.BRIDGE_PAIRING_TOKEN;
       if(command==='connect' && sources.length===1) {
         const connected=await connectDirectHost({endpoint:values.endpoint ?? DEFAULT_HOST_ENDPOINT,pairingToken:sources[0],configDir});
-        result={connected:connected.connected,hostId:connected.hostId,endpoint:connected.endpoint,configDir,next:'bridge-host start'};
+        result={connected:connected.connected,hostId:connected.hostId,endpoint:connected.endpoint,configDir,next:'bridge-host setup --background'};
       } else {
         const seconds=values['login-timeout']===undefined ? 300 : Number(values['login-timeout']);
         assertBridge(Number.isSafeInteger(seconds) && seconds>=1 && seconds<=600,'HOST_USAGE_INVALID','Login timeout must be 1-600 seconds');
@@ -100,14 +106,21 @@ try {
       assertBridge(values.yes===true,'HOST_CONSENT_REQUIRED','Maintenance requires explicit --yes. Identity, credentials, journals and runtimes are retained; see HOST_QUICKSTART.md');
       result=await maintainHost(configDir,command);
     } else if(command==='start') {
-      assertBridge(!values.background && !values['no-service'],'HOST_USAGE_INVALID','start is foreground-only; use setup --background for a service');
-      assertBridge(!persistenceStatus(configDir).active,'HOST_ALREADY_RUNNING','Background Host is active; stop it before running foreground');
-      foreground=true;
+      if(values.foreground){
+        assertBridge(!persistenceStatus(configDir).active,'HOST_ALREADY_RUNNING','Background Host is active; stop it before running foreground');
+        foreground=true;
+      } else result=await startPersistence(configDir);
     } else if(command==='doctor') {
       result=doctor({hostPolicyPath:resolve(configDir,'host.json')});process.exitCode=result.ok ? 0 : 66;
     } else if(command==='status') result=persistenceStatus(configDir);
-    else result=stopPersistence(configDir);
+    else result=await stopPersistenceAndWait(configDir);
     if(result) process.stdout.write(JSON.stringify(result,null,2)+'\n');
+    if(result?.mode==='background' && (result.active===true || result.service?.active===true)){
+      const startup=result.autostart?.enabled??result.service?.autostartEnabled;
+      process.stderr.write('Bridge Host is running in the background. You can close this terminal.\n'+
+        'Automatic startup: '+(startup===true?'on':startup===false?'off':'check status')+'.\n'+
+        'Manage with: bridge-host status | start | stop | autostart on | autostart off\n');
+    } else if(command==='stop' && result?.stopped)process.stderr.write('Bridge Host stopped. Automatic startup is off; pairing and files are retained.\n');
     if(foreground) {
       process.stderr.write('Foreground Host: keep this terminal open. Ctrl+C stops execution; pairing and Host ID are retained.\n');
       const stopped=await runForeground({configDir,pollMs,once:values.once===true});

@@ -45,7 +45,7 @@ if($d.operation -eq 'inspect'){
   if(-not $d.spec){Conflict}
 }
 if($d.spec -and $d.spec.sid -ne $sid){Conflict}
-if($task){
+function OwnedTask($task){
   if(-not $d.spec){Conflict}
   $def=$task.Definition
   Match $def.RegistrationInfo.Description $d.spec.marker 'marker'
@@ -60,31 +60,57 @@ if($task){
   Match $a.Arguments $d.spec.action.arguments 'arguments'
   Match $a.WorkingDirectory $d.spec.configDir 'workingDirectory'
   Match $t.Type 9 'triggerType'
-  Match $t.Enabled $true 'triggerEnabled'
+  Match ($t.Enabled -is [bool]) $true 'triggerEnabled'
   Match (AccountSid $t.UserId) $sid 'triggerIdentity'
   Match $def.Settings.MultipleInstances 2 'multipleInstances'
+  Match $def.Settings.AllowDemandStart $true 'allowDemandStart'
   Match ([Xml.XmlConvert]::ToTimeSpan($def.Settings.ExecutionTimeLimit)) ([TimeSpan]::Zero) 'executionLimit'
 }
+if($task){OwnedTask $task}
+function Autostart($task){return ($task.Enabled -and $task.Definition.Triggers.Item(1).Enabled)}
+function UpdateAutostart($task,$enabled){
+  # Only preference fields change. TASK_UPDATE | TASK_DONT_ADD_PRINCIPAL_ACE
+  # and a null security descriptor retain the existing task ACL and principal.
+  $security=$task.GetSecurityDescriptor(7)
+  $def=$task.Definition
+  $def.Settings.Enabled=$true;$def.Triggers.Item(1).Enabled=[bool]$enabled
+  $updated=$folder.RegisterTaskDefinition($d.name,$def,20,$sid,$null,3,$null)
+  OwnedTask $updated
+  Match ($updated.GetSecurityDescriptor(7)) $security 'securityDescriptor'
+  Match $updated.Enabled $true 'taskEnabled'
+  Match $updated.Definition.Triggers.Item(1).Enabled ([bool]$enabled) 'autostart'
+  return $updated
+}
 if($d.operation -eq 'install'){
+  $created=$false
   if(-not $task){
     $def=$svc.NewTask(0)
     $def.RegistrationInfo.Description=$d.spec.marker
     $def.Principal.UserId=$sid;$def.Principal.LogonType=3;$def.Principal.RunLevel=0
-    $trigger=$def.Triggers.Create(9);$trigger.UserId=$sid;$trigger.Enabled=$true
+    $trigger=$def.Triggers.Create(9);$trigger.UserId=$sid;$trigger.Enabled=($d.start -ne $false)
     $a=$def.Actions.Create(0);$a.Path=$d.spec.action.path;$a.Arguments=$d.spec.action.arguments;$a.WorkingDirectory=$d.spec.configDir
     $def.Settings.Enabled=$true;$def.Settings.AllowDemandStart=$true;$def.Settings.StartWhenAvailable=$true
     $def.Settings.DisallowStartIfOnBatteries=$false;$def.Settings.StopIfGoingOnBatteries=$false
     $def.Settings.ExecutionTimeLimit='PT0S';$def.Settings.MultipleInstances=2
     $def.Settings.RestartCount=3;$def.Settings.RestartInterval='PT1M'
     $task=$folder.RegisterTaskDefinition($d.name,$def,2,$sid,$null,3,$null)
+    $created=$true
   }
-  $task.Enabled=($d.start -ne $false)
+  if(-not $created){$task=UpdateAutostart $task ($d.start -ne $false)}
   if($d.start -ne $false -and $task.State -ne 4){[void]$task.Run($null)}
 }
-if($d.operation -eq 'autostart' -and $task){$task.Enabled=[bool]$d.enabled}
-if($d.operation -eq 'stop' -and $task){$task.Enabled=$false;$task.Stop(0)}
+if($d.operation -eq 'start'){
+  if(-not $task){throw 'Owned task is no longer installed'}
+  # A legacy globally disabled task cannot run on demand. Normalize both
+  # fields atomically so an interrupted start never enables automatic login.
+  $enabled=Autostart $task
+  if(-not $task.Enabled){$task=UpdateAutostart $task $enabled}
+  if($task.State -ne 4){[void]$task.Run($null)}
+}
+if($d.operation -eq 'autostart' -and $task){$task=UpdateAutostart $task ([bool]$d.enabled)}
+if($d.operation -eq 'stop' -and $task){$task=UpdateAutostart $task $false;$task.Stop(0)}
 if($d.operation -eq 'remove' -and $task){$task.Enabled=$false;$task.Stop(0);$folder.DeleteTask($d.name,0);$task=$null}
-@{installed=($null -ne $task);active=($null -ne $task -and $task.State -eq 4);autostartEnabled=($null -ne $task -and $task.Enabled);sid=$sid}|ConvertTo-Json -Compress
+@{installed=($null -ne $task);active=($null -ne $task -and $task.State -eq 4);autostartEnabled=($null -ne $task -and (Autostart $task));sid=$sid}|ConvertTo-Json -Compress
 `;
 
 export function nativeServicePaths(configDir,{platform=process.platform,home=homedir(),name}={}) {
@@ -159,6 +185,37 @@ export function nativeServiceStatus(paths,options={}) {
   assertBridge(state.status!==0 || spec,'HOST_SERVICE_CONFLICT','An unowned LaunchAgent already uses this name');
   const autostartEnabled=spec?launchdAutostart(paths,options):false;
   return {adapter:paths.adapter,name:paths.name,installed:!!spec,active:state.status===0 && /\bpid = \d+/.test(state.stdout),loaded:state.status===0,autostartEnabled};
+}
+
+export function nativeServiceIdentity(paths,options={}) {
+  const spec=receipt(paths),state=nativeServiceStatus(paths,options);
+  assertBridge(spec && state.installed && (!paths.unitPath || existsSync(paths.unitPath)),
+    'HOST_SERVICE_UNAVAILABLE','No owned native service is installed; run setup --background first');
+  assertBridge(spec.detachedConsole===undefined || spec.detachedConsole===true,
+    'HOST_SERVICE_CONFLICT','Unknown Windows console mode in the owned receipt');
+  return {nodePath:safeHostPath(spec.nodePath),daemonPath:safeHostPath(spec.daemonPath),
+    ...(paths.adapter==='windows-task' ? {detachedConsole:spec.detachedConsole===true} : {})};
+}
+
+export function startNativeService(paths,options={}) {
+  nativeServiceIdentity(paths,options);
+  const spec=receipt(paths),before=nativeServiceStatus(paths,options);
+  assertBridge(typeof before.autostartEnabled==='boolean','HOST_SERVICE_FAILED','Could not read the current autostart setting; the Host was not started');
+  if(before.active) return before;
+  if(paths.adapter==='windows-task') {
+    const state=hostPowerShell(TASK_SCRIPT,{operation:'start',name:paths.name,spec},options);
+    assertBridge(state.autostartEnabled===before.autostartEnabled,'HOST_SERVICE_FAILED','Could not verify the unchanged user-task autostart setting');
+    return {...state,adapter:paths.adapter,name:paths.name};
+  }
+  // launchd cannot bootstrap a disabled, unloaded registration without changing
+  // its persistent override. Do not silently enable future automatic startup.
+  assertBridge(before.loaded || before.autostartEnabled,'HOST_SERVICE_UNAVAILABLE',
+    'This LaunchAgent is disabled and unloaded. Enable autostart before starting it; its current setting was retained');
+  const args=before.loaded ? ['kickstart',paths.domain+'/'+paths.name] : ['bootstrap',paths.domain,paths.unitPath];
+  assertBridge(launchctl(args,options).status===0,'HOST_SERVICE_FAILED','Could not start the owned user LaunchAgent; its autostart setting was retained');
+  const after=nativeServiceStatus(paths,options);
+  assertBridge(after.autostartEnabled===before.autostartEnabled,'HOST_SERVICE_FAILED','Could not verify the unchanged LaunchAgent autostart setting');
+  return after;
 }
 
 export function preflightNativeService(paths,options={}) {
@@ -252,7 +309,8 @@ export function setNativeServiceAutostart(paths,enabled,options={}) {
     assertBridge(after.autostartEnabled===enabled,'HOST_SERVICE_FAILED','Could not verify LaunchAgent autostart');
     return after;
   }
-  // TASK_SCRIPT revalidates SID, action, trigger and marker before setting Enabled.
+  // TASK_SCRIPT revalidates SID, action, trigger and marker before atomically
+  // updating the login trigger, without changing its ACL or execution identity.
   // It deliberately calls neither Run nor Stop for this operation.
   const result=hostPowerShell(TASK_SCRIPT,{operation:'autostart',name:paths.name,spec,enabled},options);
   assertBridge(result.autostartEnabled===enabled,'HOST_SERVICE_FAILED','Could not verify the user-task autostart setting');
