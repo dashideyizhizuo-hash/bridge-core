@@ -173,7 +173,7 @@ bridge-host connect \
   --pairing-token-file /run/user/$UID/bridge-pairing
 
 bridge-host doctor
-bridge-host start
+bridge-host setup --background
 ```
 
 A replayed pairing cannot rotate an existing host: normal self-service connect is create-only. Host enable/disable is performed by the authenticated owner through Bridge `mode="host"`; the operator-only Direct admin endpoints are break-glass/service operations, not customer onboarding.

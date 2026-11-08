@@ -424,7 +424,7 @@ bridge-host connect \
   --pairing-token-file <temporary-file>
 
 bridge-host doctor
-bridge-host start
+bridge-host setup --background
 ```
 
 The host client:
